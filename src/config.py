@@ -1,0 +1,138 @@
+#!/usr/bin/env python3
+"""
+Configuration Management Module
+===============================
+Handles loading, validation, and management of application configuration.
+"""
+
+import os
+from pathlib import Path
+from typing import Dict, Any
+import logging
+
+logger = logging.getLogger(__name__)
+
+class ConfigManager:
+    """Manages application configuration with validation"""
+
+    DEFAULT_CONFIG = {
+        'sample_rate': 16000,
+        'chunk_size': 1024,
+        'channels': 1,
+        'mel_bins': 80,
+        'max_frames': 3000,
+        'chunk_duration': 3.0,
+        'overlap_duration': 1.5,
+        'model_path': '/app/models/sensevoice-rknn/sense-voice-encoder.rknn',
+        'embedding_path': '/app/models/sensevoice-rknn/embedding.npy',
+        'bpe_path': '/app/models/sensevoice-rknn/chn_jpn_yue_eng_ko_spectok.bpe.model',
+        'cmvn_path': '/app/models/sensevoice-rknn/am.mvn',
+        'language': 'auto',
+        'use_itn': True,
+        'audio_device': 'default',
+        'log_level': 'INFO',
+        'websocket_port': 8765,
+        'websocket_host': '0.0.0.0',
+        'rms_margin': 0.004,
+        'noise_calib_secs': 1.5,
+        'min_chars': 3,
+        'duplicate_cooldown_s': 4.0
+    }
+
+    REQUIRED_FILES = [
+        'model_path',
+        'embedding_path',
+        'bpe_path',
+        'cmvn_path'
+    ]
+
+    def __init__(self):
+        self.config = {}
+        self._load_config()
+
+    def _load_config(self) -> Dict[str, Any]:
+        """Load configuration from environment variables and defaults"""
+        config = self.DEFAULT_CONFIG.copy()
+
+        # Override with environment variables
+        env_mappings = {
+            'CHUNK_DURATION': ('chunk_duration', float),
+            'OVERLAP_DURATION': ('overlap_duration', float),
+            'MODEL_PATH': ('model_path', str),
+            'EMBEDDING_PATH': ('embedding_path', str),
+            'BPE_PATH': ('bpe_path', str),
+            'CMVN_PATH': ('cmvn_path', str),
+            'LANGUAGE': ('language', str),
+            'USE_ITN': ('use_itn', lambda x: x.lower() == 'true'),
+            'AUDIO_DEVICE': ('audio_device', str),
+            'LOG_LEVEL': ('log_level', str),
+            'WEBSOCKET_PORT': ('websocket_port', int),
+            'WEBSOCKET_HOST': ('websocket_host', str),
+            'RMS_MARGIN': ('rms_margin', float),
+            'NOISE_CALIB_SECS': ('noise_calib_secs', float),
+            'MIN_CHARS': ('min_chars', int),
+            'DUPLICATE_COOLDOWN_S': ('duplicate_cooldown_s', float)
+        }
+
+        for env_var, (config_key, converter) in env_mappings.items():
+            value = os.getenv(env_var)
+            if value is not None:
+                try:
+                    config[config_key] = converter(value)
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Invalid value for {env_var}: {value}, using default")
+
+        self.config = config
+        logger.info("✅ Configuration loaded successfully")
+        return config
+
+    def validate_config(self) -> bool:
+        """Validate configuration and required files"""
+        try:
+            # Check required files exist
+            for file_key in self.REQUIRED_FILES:
+                file_path = Path(self.config[file_key])
+                if not file_path.exists():
+                    logger.error(f"❌ Required file not found: {file_path}")
+                    return False
+
+                # Validate model file size (should be ~485MB)
+                if file_key == 'model_path':
+                    model_size = file_path.stat().st_size
+                    expected_size = 485 * 1024 * 1024  # ~485MB
+                    if abs(model_size - expected_size) > expected_size * 0.1:  # 10% tolerance
+                        logger.warning(f"⚠️ Model size unexpected: {model_size / 1024 / 1024:.1f}MB")
+
+            # Validate language
+            if self.config['language'] not in ['auto', 'zh', 'en', 'yue', 'ja', 'ko', 'nospeech']:
+                logger.warning(f"⚠️ Unknown language: {self.config['language']}, defaulting to 'auto'")
+                self.config['language'] = 'auto'
+
+            # Validate numeric ranges
+            if not (0.1 <= self.config['chunk_duration'] <= 10.0):
+                logger.warning(f"⚠️ Chunk duration out of range: {self.config['chunk_duration']}, clamping to 3.0")
+                self.config['chunk_duration'] = 3.0
+
+            if not (0.0 <= self.config['overlap_duration'] < self.config['chunk_duration']):
+                logger.warning(f"⚠️ Overlap duration invalid: {self.config['overlap_duration']}, setting to {self.config['chunk_duration'] * 0.5}")
+                self.config['overlap_duration'] = self.config['chunk_duration'] * 0.5
+
+            logger.info("✅ Configuration validation passed")
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ Configuration validation failed: {e}")
+            return False
+
+    def get(self, key: str, default=None) -> Any:
+        """Get configuration value"""
+        return self.config.get(key, default)
+
+    def get_all(self) -> Dict[str, Any]:
+        """Get all configuration values"""
+        return self.config.copy()
+
+    def update(self, updates: Dict[str, Any]) -> None:
+        """Update configuration values"""
+        self.config.update(updates)
+        logger.info(f"✅ Configuration updated: {list(updates.keys())}")
