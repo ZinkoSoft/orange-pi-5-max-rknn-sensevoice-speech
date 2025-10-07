@@ -23,6 +23,7 @@ from audio_processor import AudioProcessor
 from transcription_decoder import TranscriptionDecoder
 from websocket_manager import WebSocketManager
 from statistics_tracker import StatisticsTracker
+from timeline_merger import TimelineMerger
 
 # Configure logging
 logging.basicConfig(
@@ -52,6 +53,15 @@ class LiveTranscriber:
         self.transcription_decoder = TranscriptionDecoder(self.config)
         self.websocket_manager = WebSocketManager(self.config)
         self.statistics = StatisticsTracker()
+        
+        # Initialize timeline merger if enabled
+        self.enable_timeline_merging = self.config.get('enable_timeline_merging', True)
+        if self.enable_timeline_merging:
+            self.timeline_merger = TimelineMerger(self.config)
+            logger.info("✅ Timeline-based merging enabled")
+        else:
+            self.timeline_merger = None
+            logger.info("⚠️ Timeline-based merging disabled (using legacy text deduplication)")
 
         # Audio processing state
         self.audio_queue = queue.Queue()
@@ -77,6 +87,10 @@ class LiveTranscriber:
         self.language_locked = (self.current_language != 'auto')  # Already locked if not auto
         self.language_warmup_start = None
         self.language_detections = []  # Track detected languages during warmup
+        
+        # Timeline tracking for chunk offsets
+        self.chunk_counter = 0
+        self.chunk_duration_ms = self.chunk_duration * 1000  # Convert to milliseconds
         
         logger.info("Initializing Live Transcriber with modular components")
         if self.language_lock_enabled and not self.language_locked:
@@ -163,8 +177,211 @@ class LiveTranscriber:
         finally:
             audio.terminate()
 
+    def _bootstrap_noise_floor(self, audio_buffer: np.ndarray, rms_accum: list, 
+                               seen_for_calib: int, calib_needed: int) -> tuple:
+        """
+        Bootstrap noise floor calibration from initial audio samples.
+        
+        Args:
+            audio_buffer: Current audio buffer
+            rms_accum: Accumulated RMS values for calibration
+            seen_for_calib: Number of samples seen so far
+            calib_needed: Total samples needed for calibration
+            
+        Returns:
+            tuple: (noise_floor, seen_for_calib) - noise_floor is None if still calibrating
+        """
+        sample = audio_buffer[:min(len(audio_buffer), calib_needed)]
+        rms_accum.append(self.audio_processor.calculate_rms(sample))
+        seen_for_calib = len(sample)
+        
+        if seen_for_calib >= calib_needed:
+            noise_floor = float(np.median(rms_accum))
+            logger.info(f"Calibrated noise floor = {noise_floor:.6f} (over {self.noise_calib_secs:.1f}s)")
+            return noise_floor, seen_for_calib
+        
+        return None, seen_for_calib
+    
+    def _update_adaptive_noise_floor(self, vad_metrics: dict, noise_floor_history: list, 
+                                    noise_update_counter: int, noise_update_interval: int) -> tuple:
+        """
+        Update adaptive noise floor from non-speech segments.
+        
+        Args:
+            vad_metrics: Voice activity detection metrics containing RMS
+            noise_floor_history: History of RMS values from non-speech
+            noise_update_counter: Counter for update interval
+            noise_update_interval: How often to update (number of non-speech chunks)
+            
+        Returns:
+            tuple: (noise_floor, noise_floor_history, noise_update_counter)
+        """
+        noise_floor_history.append(vad_metrics['rms'])
+        noise_update_counter += 1
+        
+        if noise_update_counter >= noise_update_interval:
+            if len(noise_floor_history) >= 20:
+                # Use median of recent non-speech segments
+                new_noise_floor = float(np.median(noise_floor_history[-50:]))
+                logger.info(f"🔄 Updated noise floor to {new_noise_floor:.6f}")
+                noise_floor_history = noise_floor_history[-100:]  # Keep recent history
+                noise_update_counter = 0
+                return new_noise_floor, noise_floor_history, noise_update_counter
+            noise_update_counter = 0
+        
+        return self.noise_floor, noise_floor_history, noise_update_counter
+    
+    def _handle_language_auto_lock(self, result: dict) -> None:
+        """
+        Handle language auto-lock logic based on detected language.
+        
+        Args:
+            result: Transcription result dictionary containing language detection
+        """
+        if not self.language_lock_enabled or self.language_locked:
+            return
+        
+        detected_lang = result.get('language')
+        if not detected_lang:
+            return
+        
+        # Map language name back to code
+        lang_code_map = {
+            'Chinese': 'zh',
+            'English': 'en',
+            'Japanese': 'ja',
+            'Korean': 'ko',
+            'Cantonese': 'yue'
+        }
+        lang_code = lang_code_map.get(detected_lang)
+        if not lang_code:
+            return
+        
+        self.language_detections.append(lang_code)
+        
+        # Check if warmup period complete
+        warmup_elapsed = time.time() - self.language_warmup_start
+        warmup_target = self.config.get('language_lock_warmup_s', 10.0)
+        min_samples = self.config.get('language_lock_min_samples', 3)
+        
+        if warmup_elapsed >= warmup_target and len(self.language_detections) >= min_samples:
+            # Calculate language distribution
+            from collections import Counter
+            lang_counts = Counter(self.language_detections)
+            total = len(self.language_detections)
+            most_common_lang, count = lang_counts.most_common(1)[0]
+            confidence = count / total
+            
+            lock_threshold = self.config.get('language_lock_confidence', 0.6)
+            if confidence >= lock_threshold:
+                self.current_language = most_common_lang
+                self.language_locked = True
+                logger.info(f"🔒 Language LOCKED to '{most_common_lang}' "
+                          f"(confidence: {confidence:.1%}, samples: {count}/{total})")
+            else:
+                logger.info(f"⚠️ Language detection inconclusive after warmup "
+                          f"(best: {most_common_lang} at {confidence:.1%}), "
+                          f"remaining in auto mode")
+                # Don't try to lock again
+                self.language_locked = True
+    
+    def _apply_metadata_filtering(self, result: dict) -> tuple:
+        """
+        Apply metadata-based filtering (BGM, events, etc.).
+        
+        Args:
+            result: Transcription result dictionary
+            
+        Returns:
+            tuple: (should_filter, filter_reason) - bool and string reason
+        """
+        # Check if BGM filtering is enabled
+        if self.config.get('filter_bgm', False):
+            if 'BGM' in result.get('audio_events', []):
+                return True, "Background music detected"
+        
+        # Check for specific event filtering
+        filter_events = self.config.get('filter_events', [])
+        if filter_events:
+            for event in result.get('audio_events', []):
+                if event in filter_events:
+                    return True, f"Filtered event: {event}"
+        
+        return False, None
+    
+    def _build_display_text(self, text: str, result: dict) -> str:
+        """
+        Build formatted display text with emojis and metadata.
+        
+        Args:
+            text: Base transcription text
+            result: Transcription result dictionary with metadata
+            
+        Returns:
+            str: Formatted display text
+        """
+        display_parts = []
+        
+        # Add emotion emoji if present and enabled
+        if self.config.get('show_emotions', False) and result.get('emotion'):
+            from transcription_decoder import EMOTION_TAGS
+            emoji = EMOTION_TAGS.get(result['emotion'], '')
+            display_parts.append(emoji)
+        
+        # Add audio event emojis if present and enabled
+        if self.config.get('show_events', True) and result.get('audio_events'):
+            from transcription_decoder import AUDIO_EVENT_TAGS
+            for event in result['audio_events']:
+                emoji = AUDIO_EVENT_TAGS.get(event, '')
+                display_parts.append(emoji)
+        
+        # Add the transcription text
+        display_parts.append(text)
+        
+        # Add language tag if detected and enabled
+        if self.config.get('show_language', True) and result.get('language'):
+            display_parts.append(f"[{result['language']}]")
+        
+        return ' '.join(display_parts)
+    
+    def _emit_transcription(self, display_text: str, result: dict, new_words: list = None) -> None:
+        """
+        Emit transcription to console and WebSocket.
+        
+        Args:
+            display_text: Formatted text to display
+            result: Full transcription result dictionary
+            new_words: Optional list of new words (for timeline merging)
+        """
+        print(f"TRANSCRIPT: {display_text}")
+        sys.stdout.flush()
+        
+        # Update result for WebSocket if using timeline merging
+        if new_words is not None:
+            result['words'] = new_words
+        
+        # Broadcast via WebSocket
+        self.websocket_manager.broadcast_transcription(result)
+    
     def _process_audio_worker(self) -> None:
-        """Main audio processing worker"""
+        """
+        Main audio processing worker thread.
+        
+        Orchestrates the complete audio processing pipeline:
+        1. Buffer audio chunks from queue
+        2. Bootstrap/update noise floor calibration
+        3. Resample audio to model rate (16kHz)
+        4. Perform voice activity detection (VAD)
+        5. Generate audio features for NPU
+        6. Run NPU inference
+        7. Decode transcription with timestamps
+        8. Apply language auto-lock if enabled
+        9. Filter based on metadata (BGM, events)
+        10. Merge chunks using timeline (if enabled) or text deduplication
+        11. Format and emit transcription output
+        
+        This method runs in a separate daemon thread until is_recording is set to False.
+        """
         audio_buffer = np.array([], dtype=np.int16)
 
         # Size thresholds in device samples
@@ -191,12 +408,9 @@ class LiveTranscriber:
 
                 # Bootstrap noise floor from first N seconds
                 if self.noise_floor is None and seen_for_calib < calib_needed:
-                    sample = audio_buffer[:min(len(audio_buffer), calib_needed)]
-                    rms_accum.append(self.audio_processor.calculate_rms(sample))
-                    seen_for_calib = len(sample)
-                    if seen_for_calib >= calib_needed:
-                        self.noise_floor = float(np.median(rms_accum))
-                        logger.info(f"Calibrated noise floor = {self.noise_floor:.6f} (over {self.noise_calib_secs:.1f}s)")
+                    self.noise_floor, seen_for_calib = self._bootstrap_noise_floor(
+                        audio_buffer, rms_accum, seen_for_calib, calib_needed
+                    )
                     continue
 
                 if len(audio_buffer) < buffer_size_dev:
@@ -213,16 +427,9 @@ class LiveTranscriber:
                                f"Entropy={vad_metrics['spectral_entropy']:.3f}")
                     
                     # Update adaptive noise floor from non-speech segments
-                    noise_floor_history.append(vad_metrics['rms'])
-                    noise_update_counter += 1
-                    
-                    if noise_update_counter >= noise_update_interval:
-                        if len(noise_floor_history) >= 20:
-                            # Use median of recent non-speech segments
-                            self.noise_floor = float(np.median(noise_floor_history[-50:]))
-                            logger.info(f"🔄 Updated noise floor to {self.noise_floor:.6f}")
-                            noise_floor_history = noise_floor_history[-100:]  # Keep recent history
-                        noise_update_counter = 0
+                    self.noise_floor, noise_floor_history, noise_update_counter = self._update_adaptive_noise_floor(
+                        vad_metrics, noise_floor_history, noise_update_counter, noise_update_interval
+                    )
                     
                     audio_buffer = audio_buffer[-overlap_size_dev:] if overlap_size_dev > 0 else np.array([], dtype=np.int16)
                     continue
@@ -263,101 +470,45 @@ class LiveTranscriber:
                             self.transcription_decoder.add_audio_hash(audio_hash, result)
                             
                             # Language auto-lock logic
-                            if self.language_lock_enabled and not self.language_locked:
-                                detected_lang = result.get('language')
-                                if detected_lang:
-                                    # Map language name back to code
-                                    lang_code_map = {
-                                        'Chinese': 'zh',
-                                        'English': 'en',
-                                        'Japanese': 'ja',
-                                        'Korean': 'ko',
-                                        'Cantonese': 'yue'
-                                    }
-                                    lang_code = lang_code_map.get(detected_lang)
-                                    if lang_code:
-                                        self.language_detections.append(lang_code)
-                                        
-                                        # Check if warmup period complete
-                                        warmup_elapsed = time.time() - self.language_warmup_start
-                                        warmup_target = self.config.get('language_lock_warmup_s', 10.0)
-                                        min_samples = self.config.get('language_lock_min_samples', 3)
-                                        
-                                        if (warmup_elapsed >= warmup_target and 
-                                            len(self.language_detections) >= min_samples):
-                                            # Calculate language distribution
-                                            from collections import Counter
-                                            lang_counts = Counter(self.language_detections)
-                                            total = len(self.language_detections)
-                                            most_common_lang, count = lang_counts.most_common(1)[0]
-                                            confidence = count / total
-                                            
-                                            lock_threshold = self.config.get('language_lock_confidence', 0.6)
-                                            if confidence >= lock_threshold:
-                                                self.current_language = most_common_lang
-                                                self.language_locked = True
-                                                logger.info(f"🔒 Language LOCKED to '{most_common_lang}' "
-                                                          f"(confidence: {confidence:.1%}, samples: {count}/{total})")
-                                            else:
-                                                logger.info(f"⚠️ Language detection inconclusive after warmup "
-                                                          f"(best: {most_common_lang} at {confidence:.1%}), "
-                                                          f"remaining in auto mode")
-                                                # Don't try to lock again
-                                                self.language_locked = True
+                            self._handle_language_auto_lock(result)
                             
                             # Apply metadata-based filtering
-                            should_filter = False
-                            filter_reason = None
-                            
-                            # Check if BGM filtering is enabled
-                            if self.config.get('filter_bgm', False):
-                                if 'BGM' in result.get('audio_events', []):
-                                    should_filter = True
-                                    filter_reason = "Background music detected"
-                            
-                            # Check for specific event filtering
-                            filter_events = self.config.get('filter_events', [])
-                            if filter_events:
-                                for event in result.get('audio_events', []):
-                                    if event in filter_events:
-                                        should_filter = True
-                                        filter_reason = f"Filtered event: {event}"
-                                        break
+                            should_filter, filter_reason = self._apply_metadata_filtering(result)
                             
                             if should_filter:
                                 logger.debug(f"🚫 {filter_reason}: '{result['text']}'")
                                 audio_buffer = audio_buffer[-overlap_size_dev:] if overlap_size_dev > 0 else np.array([], dtype=np.int16)
+                                self.chunk_counter += 1
                                 continue
                             
-                            # Format rich output for display
-                            display_parts = []
+                            # Use timeline-based merging if enabled
+                            if self.enable_timeline_merging and result.get('words'):
+                                # Calculate chunk offset in global timeline
+                                chunk_offset_ms = self.chunk_counter * self.chunk_duration_ms
+                                
+                                # Merge chunk into timeline
+                                new_words = self.timeline_merger.merge_chunk(
+                                    result['words'],
+                                    chunk_offset_ms
+                                )
+                                
+                                if new_words:
+                                    # Build display text from NEW words only
+                                    new_text = ' '.join(w['word'] for w in new_words)
+                                    display_text = self._build_display_text(new_text, result)
+                                    
+                                    # Update result with new text
+                                    result['text'] = new_text
+                                    
+                                    # Emit transcription
+                                    self._emit_transcription(display_text, result, new_words)
+                            else:
+                                # Fallback to legacy text-based display
+                                display_text = self._build_display_text(result['text'], result)
+                                self._emit_transcription(display_text, result)
                             
-                            # Add emotion emoji if present and enabled
-                            if self.config.get('show_emotions', True) and result.get('emotion'):
-                                from transcription_decoder import EMOTION_TAGS
-                                emoji = EMOTION_TAGS.get(result['emotion'], '')
-                                display_parts.append(emoji)
-                            
-                            # Add audio event emojis if present and enabled
-                            if self.config.get('show_events', True) and result.get('audio_events'):
-                                from transcription_decoder import AUDIO_EVENT_TAGS
-                                for event in result['audio_events']:
-                                    emoji = AUDIO_EVENT_TAGS.get(event, '')
-                                    display_parts.append(emoji)
-                            
-                            # Add the transcription text
-                            display_parts.append(result['text'])
-                            
-                            # Add language tag if detected and enabled
-                            if self.config.get('show_language', True) and result.get('language'):
-                                display_parts.append(f"[{result['language']}]")
-                            
-                            display_text = ' '.join(display_parts)
-                            print(f"TRANSCRIPT: {display_text}")
-                            sys.stdout.flush()
-
-                            # Broadcast via WebSocket (send full result with metadata)
-                            self.websocket_manager.broadcast_transcription(result)
+                            # Increment chunk counter for timeline tracking
+                            self.chunk_counter += 1
 
                 # Keep overlap in device samples
                 audio_buffer = audio_buffer[-overlap_size_dev:] if overlap_size_dev > 0 else np.array([], dtype=np.int16)
