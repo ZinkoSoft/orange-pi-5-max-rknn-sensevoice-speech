@@ -33,8 +33,9 @@ class ModelManager:
             if ret != 0:
                 raise RuntimeError(f"Failed to load RKNN model: {ret}")
 
-            # Initialize runtime
-            ret = self.rknn.init_runtime(core_mask=RKNNLite.NPU_CORE_0_1_2)
+            # Initialize runtime - use single core for sequential inference
+            # Using all 3 cores adds overhead without benefit for single-threaded processing
+            ret = self.rknn.init_runtime(core_mask=RKNNLite.NPU_CORE_0)
             if ret != 0:
                 raise RuntimeError(f"Failed to initialize RKNN runtime: {ret}")
 

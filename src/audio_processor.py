@@ -6,7 +6,7 @@ Handles audio input, feature extraction, and preprocessing for SenseVoice.
 """
 
 import numpy as np
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict
 import logging
 import kaldi_native_fbank as knf
 
@@ -135,6 +135,14 @@ class AudioProcessor:
         self.frontend = None
         self.embedding = None
         self._last_resample_used = None
+        
+        # VAD parameters from config
+        self.vad_energy_threshold = 0.01  # Will be calibrated
+        self.vad_zcr_min = config.get('vad_zcr_min', 0.02)
+        self.vad_zcr_max = config.get('vad_zcr_max', 0.35)
+        self.vad_entropy_max = config.get('vad_entropy_max', 0.85)
+        self.enable_vad = config.get('enable_vad', True)
+        self.vad_mode = config.get('vad_mode', 'accurate')  # 'fast' or 'accurate'
 
         # Initialize frontend
         self._init_frontend()
@@ -191,11 +199,139 @@ class AudioProcessor:
             return y
 
     def calculate_rms(self, audio_data: np.ndarray) -> float:
-        """Calculate RMS of audio data"""
-        x = audio_data.astype(np.float32)
-        if x.dtype == np.int16:
-            x = x / 32768.0
-        return float(np.sqrt(np.mean(x * x) + 1e-12))
+        """Calculate RMS of audio data (optimized)"""
+        # Use float32 directly to avoid double conversion
+        if audio_data.dtype == np.int16:
+            # Vectorized normalization
+            x = audio_data.astype(np.float32) * (1.0 / 32768.0)
+        else:
+            x = audio_data.astype(np.float32)
+        # Use np.square for better performance than x * x
+        return float(np.sqrt(np.mean(np.square(x)) + 1e-12))
+
+    def calculate_zero_crossing_rate(self, audio_data: np.ndarray) -> float:
+        """
+        Calculate zero-crossing rate (ZCR) of audio signal (optimized).
+        Higher ZCR typically indicates unvoiced speech or noise.
+        Lower ZCR typically indicates voiced speech.
+        """
+        if len(audio_data) < 2:
+            return 0.0
+        
+        # Vectorized ZCR calculation - avoid intermediate arrays
+        if audio_data.dtype == np.int16:
+            x = audio_data.astype(np.float32) * (1.0 / 32768.0)
+        else:
+            x = audio_data.astype(np.float32)
+        
+        # Fast zero-crossing: count where adjacent samples have different signs
+        # Using x[:-1] * x[1:] < 0 is faster than sign + diff
+        crossings = np.sum(x[:-1] * x[1:] < 0)
+        return float(crossings / len(x))
+
+    def calculate_spectral_entropy(self, audio_data: np.ndarray) -> float:
+        """
+        Calculate spectral entropy of audio signal (optimized).
+        Lower entropy indicates tonal/speech content.
+        Higher entropy indicates noise or silence.
+        """
+        if len(audio_data) < 2:
+            return 1.0
+        
+        # Ensure float32 (faster FFT than float64)
+        if audio_data.dtype == np.int16:
+            x = audio_data.astype(np.float32) * (1.0 / 32768.0)
+        else:
+            x = audio_data.astype(np.float32)
+        
+        # Compute power spectrum using rfft (real FFT is 2x faster)
+        fft = np.fft.rfft(x)
+        # Use absolute + square separately is faster than abs**2
+        power_spectrum = np.square(np.abs(fft))
+        
+        # Add epsilon and normalize in one step
+        eps = 1e-12
+        psd = power_spectrum / (np.sum(power_spectrum) + eps)
+        
+        # Vectorized entropy calculation
+        # Only compute log where psd > 0 to avoid unnecessary operations
+        mask = psd > eps
+        entropy = -np.sum(psd[mask] * np.log2(psd[mask]))
+        
+        # Normalize by maximum possible entropy
+        max_entropy = np.log2(np.sum(mask))  # Use actual non-zero count
+        normalized_entropy = entropy / max_entropy if max_entropy > 0 else 1.0
+        
+        return float(normalized_entropy)
+
+    def is_speech_segment(self, audio_data: np.ndarray, noise_floor: float = None) -> Tuple[bool, Dict[str, float]]:
+        """
+        Advanced Voice Activity Detection (VAD) using multiple features.
+        Supports 'fast' mode (RMS+ZCR only, ~0.3ms) or 'accurate' mode (adds FFT, ~1.5ms).
+        
+        Returns:
+            Tuple of (is_speech: bool, metrics: dict)
+        """
+        # Calculate base features (always needed, very fast)
+        rms = self.calculate_rms(audio_data)
+        
+        # Energy-based detection with adaptive threshold
+        if noise_floor is not None:
+            energy_threshold = noise_floor + self.config.get('rms_margin', 0.004)
+        else:
+            energy_threshold = self.vad_energy_threshold
+        
+        energy_check = rms > energy_threshold
+        
+        # Early exit if energy is too low (saves ZCR/FFT computation)
+        if not energy_check:
+            return False, {
+                'rms': rms,
+                'zcr': 0.0,
+                'spectral_entropy': 1.0,
+                'is_speech': False,
+                'energy_check': False,
+                'zcr_check': False,
+                'entropy_check': False
+            }
+        
+        # Calculate ZCR (fast, ~0.2ms)
+        zcr = self.calculate_zero_crossing_rate(audio_data)
+        zcr_check = self.vad_zcr_min < zcr < self.vad_zcr_max
+        
+        # Fast mode: Skip expensive FFT calculation
+        if self.vad_mode == 'fast':
+            # Simpler decision: energy + ZCR only
+            is_speech = energy_check and zcr_check
+            metrics = {
+                'rms': rms,
+                'zcr': zcr,
+                'spectral_entropy': -1.0,  # Not calculated in fast mode
+                'is_speech': is_speech,
+                'energy_check': energy_check,
+                'zcr_check': zcr_check,
+                'entropy_check': True  # Assume pass in fast mode
+            }
+            return is_speech, metrics
+        
+        # Accurate mode: Add spectral entropy (expensive FFT, ~1ms)
+        spectral_entropy = self.calculate_spectral_entropy(audio_data)
+        entropy_check = spectral_entropy < self.vad_entropy_max
+        
+        # Combine checks - require energy + at least one other feature
+        is_speech = energy_check and (zcr_check or entropy_check)
+        
+        metrics = {
+            'rms': rms,
+            'zcr': zcr,
+            'spectral_entropy': spectral_entropy,
+            'is_speech': is_speech,
+            'energy_check': energy_check,
+            'zcr_check': zcr_check,
+            'entropy_check': entropy_check
+        }
+        
+        return is_speech, metrics
 
     def audio_to_features(self, audio_data: np.ndarray, language: str = 'auto',
                          use_itn: bool = True) -> Optional[np.ndarray]:

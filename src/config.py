@@ -36,7 +36,14 @@ class ConfigManager:
         'rms_margin': 0.004,
         'noise_calib_secs': 1.5,
         'min_chars': 3,
-        'duplicate_cooldown_s': 4.0
+        'duplicate_cooldown_s': 4.0,
+        'similarity_threshold': 0.85,  # Fuzzy matching threshold (0.0-1.0)
+        'enable_vad': True,  # Enable Voice Activity Detection
+        'vad_zcr_min': 0.02,  # Minimum zero-crossing rate for speech
+        'vad_zcr_max': 0.35,  # Maximum zero-crossing rate for speech
+        'vad_entropy_max': 0.85,  # Maximum spectral entropy for speech
+        'adaptive_noise_floor': True,  # Enable adaptive noise floor updates
+        'vad_mode': 'accurate'  # 'fast' (RMS+ZCR, ~0.3ms) or 'accurate' (adds FFT, ~1.5ms)
     }
 
     REQUIRED_FILES = [
@@ -71,7 +78,14 @@ class ConfigManager:
             'RMS_MARGIN': ('rms_margin', float),
             'NOISE_CALIB_SECS': ('noise_calib_secs', float),
             'MIN_CHARS': ('min_chars', int),
-            'DUPLICATE_COOLDOWN_S': ('duplicate_cooldown_s', float)
+            'DUPLICATE_COOLDOWN_S': ('duplicate_cooldown_s', float),
+            'SIMILARITY_THRESHOLD': ('similarity_threshold', float),
+            'ENABLE_VAD': ('enable_vad', lambda x: x.lower() == 'true'),
+            'VAD_ZCR_MIN': ('vad_zcr_min', float),
+            'VAD_ZCR_MAX': ('vad_zcr_max', float),
+            'VAD_ENTROPY_MAX': ('vad_entropy_max', float),
+            'ADAPTIVE_NOISE_FLOOR': ('adaptive_noise_floor', lambda x: x.lower() == 'true'),
+            'VAD_MODE': ('vad_mode', str)
         }
 
         for env_var, (config_key, converter) in env_mappings.items():

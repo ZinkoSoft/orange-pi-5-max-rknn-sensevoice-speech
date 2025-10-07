@@ -169,6 +169,11 @@ class LiveTranscriber:
         calib_needed = int(dev_rate * self.noise_calib_secs)
         rms_accum = []
         seen_for_calib = 0
+        
+        # Adaptive noise floor tracking
+        noise_floor_history = []
+        noise_update_counter = 0
+        noise_update_interval = 50  # Update every 50 non-speech chunks
 
         while self.is_recording:
             try:
@@ -191,13 +196,35 @@ class LiveTranscriber:
                 # Resample to model rate
                 x16 = self.audio_processor.resample_to_model_rate(audio_buffer)
 
-                # Energy gate
-                rms = self.audio_processor.calculate_rms(x16)
-                if self.noise_floor is not None and rms < (self.noise_floor + self.rms_margin):
-                    logger.debug(f"Skip: RMS {rms:.6f} < floor {self.noise_floor:.6f} + {self.rms_margin:.6f}")
+                # Advanced Voice Activity Detection
+                is_speech, vad_metrics = self.audio_processor.is_speech_segment(x16, self.noise_floor)
+                
+                if not is_speech:
+                    logger.debug(f"Skip (VAD): RMS={vad_metrics['rms']:.4f} ZCR={vad_metrics['zcr']:.3f} "
+                               f"Entropy={vad_metrics['spectral_entropy']:.3f}")
+                    
+                    # Update adaptive noise floor from non-speech segments
+                    noise_floor_history.append(vad_metrics['rms'])
+                    noise_update_counter += 1
+                    
+                    if noise_update_counter >= noise_update_interval:
+                        if len(noise_floor_history) >= 20:
+                            # Use median of recent non-speech segments
+                            self.noise_floor = float(np.median(noise_floor_history[-50:]))
+                            logger.info(f"🔄 Updated noise floor to {self.noise_floor:.6f}")
+                            noise_floor_history = noise_floor_history[-100:]  # Keep recent history
+                        noise_update_counter = 0
+                    
                     audio_buffer = audio_buffer[-overlap_size_dev:] if overlap_size_dev > 0 else np.array([], dtype=np.int16)
                     continue
+                
+                logger.debug(f"✅ Speech detected: RMS={vad_metrics['rms']:.4f} ZCR={vad_metrics['zcr']:.3f} "
+                           f"Entropy={vad_metrics['spectral_entropy']:.3f}")
 
+                # Generate audio fingerprint to detect duplicate chunks from overlap
+                import hashlib
+                audio_hash = hashlib.md5(x16.tobytes()).hexdigest()[:16]
+                
                 # Convert to features
                 mel_input = self.audio_processor.audio_to_features(
                     x16, self.config['language'], self.config['use_itn']
@@ -213,10 +240,13 @@ class LiveTranscriber:
                         # Record statistics
                         self.statistics.record_inference(inference_time)
 
-                        # Decode transcription
-                        transcription = self.transcription_decoder.decode_output(npu_output)
+                        # Decode transcription with audio hash for deduplication
+                        transcription = self.transcription_decoder.decode_output(npu_output, audio_hash)
 
                         if transcription is not None:
+                            # Store audio hash with transcription for chunk deduplication
+                            self.transcription_decoder.add_audio_hash(audio_hash, transcription)
+                            
                             print(f"TRANSCRIPT: {transcription}")
                             sys.stdout.flush()
 
