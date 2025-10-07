@@ -175,17 +175,17 @@ Decode + Deduplication
 
 ## Next Steps
 
-- **Fine-tune for your environment**: See [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md)
-- **Understand VAD**: Read [VAD_OPTIMIZATION.md](VAD_OPTIMIZATION.md)
-- **See performance details**: Check [PIPELINE_DIAGRAM.md](PIPELINE_DIAGRAM.md)
-- **Learn about changes**: Review [CHANGES_SUMMARY.md](CHANGES_SUMMARY.md)
+- **Fine-tune for your environment**: See [OPTIMIZATION_GUIDE.md](../optimization/OPTIMIZATION_GUIDE.md)
+- **Understand VAD**: Read [VAD_OPTIMIZATION.md](../optimization/VAD_OPTIMIZATION.md)
+- **See performance details**: Check [PIPELINE_DIAGRAM.md](../optimization/PIPELINE_DIAGRAM.md)
+- **Learn about changes**: Review [CHANGES_SUMMARY.md](../optimization/CHANGES_SUMMARY.md)
 
 ## Support
 
 If you run into issues:
 
-1. Check the [README.md](README.md) troubleshooting section
-2. Review the [OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md)
+1. Check the [README.md](../../README.md) troubleshooting section
+2. Review the [OPTIMIZATION_GUIDE.md](../optimization/OPTIMIZATION_GUIDE.md)
 3. Enable debug logging: `export LOG_LEVEL=DEBUG`
 4. Open an issue on GitHub with logs
 

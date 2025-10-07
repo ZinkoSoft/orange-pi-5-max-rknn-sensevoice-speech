@@ -241,7 +241,7 @@ Clients now receive rich metadata:
 ## Documentation
 
 ### Primary Guide
-📖 **[SENSEVOICE_FEATURES.md](SENSEVOICE_FEATURES.md)** - Complete 470+ line guide
+📖 **[SENSEVOICE_FEATURES.md](../features/SENSEVOICE_FEATURES.md)** - Complete 470+ line guide
 
 **Includes**:
 - Feature descriptions with examples
@@ -253,7 +253,7 @@ Clients now receive rich metadata:
 - Performance analysis
 
 ### Quick References
-- **[README.md](README.md)** - Feature overview + config table
+- **[README.md](../../README.md)** - Feature overview + config table
 - **[DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md)** - Navigation
 
 ---
@@ -274,7 +274,7 @@ Clients now receive rich metadata:
 
 ### Customize for Your Use Case
 
-Edit `docker-compose.yml` to enable/disable features based on your needs. See **[SENSEVOICE_FEATURES.md](SENSEVOICE_FEATURES.md)** for examples.
+Edit `docker-compose.yml` to enable/disable features based on your needs. See **[SENSEVOICE_FEATURES.md](../features/SENSEVOICE_FEATURES.md)** for examples.
 
 ---
 

@@ -4,14 +4,17 @@
 
 > **⚡ Performance Highlights**: 92% faster inference • 86% fewer duplicates • 52% better quiet audio detection • 21% lower power
 
+> 📚 **Documentation**: All guides organized in [`docs/`](docs/) folder - [Browse Documentation →](docs/README.md)
+
 ## 📚 Quick Links
 
 - 🚀 [Quick Start](#-quick-start) - Get running in 5 minutes
 - ⚙️ [Configuration Presets](#configuration) - One-command optimization
 - 📊 [Performance Benchmarks](#-performance-optimization) - Before/after metrics
-- 📖 [Optimization Guide](OPTIMIZATION_GUIDE.md) - Complete technical guide
+- 📖 [Optimization Guide](docs/optimization/OPTIMIZATION_GUIDE.md) - Complete technical guide
+- ⚡ [Confidence Stitching Guide](docs/features/CONFIDENCE_STITCHING_QUICKSTART.md) - Smart chunk boundary handling
 - 🔧 [Troubleshooting](#-troubleshooting) - Common issues and solutions
-- 📑 [Documentation Index](DOCUMENTATION_INDEX.md) - Complete guide to all docs
+- 📑 [Documentation Index](docs/DOCUMENTATION_INDEX.md) - Complete guide to all docs
 
 ## 🎯 Features
 
@@ -33,6 +36,7 @@
 - 🔥 **Two-Tier VAD**: Fast mode (0.3ms) or Accurate mode (1.5ms)
 - 🔥 **70-90% Fewer Duplicates**: Advanced deduplication pipeline
 - 🔥 **50-80% Better Quiet Audio**: Enhanced low-volume speech detection
+- ⚡ **Confidence-Gated Stitching**: Uses model's token confidence to eliminate garbled merges at chunk boundaries
 
 ### 🎭 Rich Metadata Features (NEW!)
 - 🌍 **Language Identification (LID)**: Auto-detect language (Chinese, English, Japanese, Korean, Cantonese)
@@ -42,7 +46,7 @@
 - � **Language Auto-Lock**: Start with auto-detection, then lock to prevent language wobble
 - �📊 **Zero Overhead**: Metadata extraction uses existing model output (no extra inference time)
 
-**[📖 Complete Feature Guide](SENSEVOICE_FEATURES.md)** - Learn how to use all SenseVoice capabilities!
+**[📖 Complete Feature Guide](docs/features/SENSEVOICE_FEATURES.md)** - Learn how to use all SenseVoice capabilities!
 
 ## 📋 Quick Start
 
@@ -80,11 +84,12 @@ orange-pi-5-max-rknn-sensevoice-speech/
 ├── entrypoint.sh                   # Container startup and initialization
 ├── healthcheck.sh                  # Health monitoring and diagnostics
 ├── README.md                       # This file
-├── OPTIMIZATION_GUIDE.md           # 🆕 NPU & accuracy optimization guide
-├── VAD_OPTIMIZATION.md             # 🆕 VAD performance deep dive
-├── VAD_COMPARISON.md               # 🆕 Visual VAD comparisons
-├── PIPELINE_DIAGRAM.md             # 🆕 Processing pipeline diagrams
-├── CHANGES_SUMMARY.md              # 🆕 Quick change reference
+├── docs/                           # 📚 All documentation
+│   ├── DOCUMENTATION_INDEX.md      # Complete docs index
+│   ├── getting-started/            # Quick start guides
+│   ├── optimization/               # Performance & tuning
+│   ├── features/                   # Feature guides
+│   └── troubleshooting/            # Debug & issues
 ├── scripts/
 │   ├── download_models.sh          # Intelligent model download with caching
 │   └── configure_optimization.sh   # 🆕 Quick preset configurator
@@ -543,12 +548,62 @@ watch -n 1 'cat /sys/kernel/debug/rknpu/load'
 
 ## 📖 Additional Documentation
 
-- **[OPTIMIZATION_GUIDE.md](OPTIMIZATION_GUIDE.md)** - Complete guide to NPU and accuracy optimizations
-- **[VAD_OPTIMIZATION.md](VAD_OPTIMIZATION.md)** - Deep dive into VAD performance and CPU vs NPU
-- **[VAD_COMPARISON.md](VAD_COMPARISON.md)** - Visual comparisons and benchmarks
-- **[PIPELINE_DIAGRAM.md](PIPELINE_DIAGRAM.md)** - Processing pipeline flowcharts
-- **[CHANGES_SUMMARY.md](CHANGES_SUMMARY.md)** - Quick reference of all changes
-- **[VAD_NPU_ANALYSIS.md](VAD_NPU_ANALYSIS.md)** - Why NPU VAD doesn't make sense
+### 📚 [Complete Documentation Index](docs/DOCUMENTATION_INDEX.md)
+
+**Quick access to key docs:**
+
+#### Getting Started
+- **[Quickstart Guide](docs/getting-started/QUICKSTART.md)** - 5-minute setup
+
+#### Optimization & Performance
+- **[Optimization Guide](docs/optimization/OPTIMIZATION_GUIDE.md)** - Complete NPU optimization
+- **[VAD Optimization](docs/optimization/VAD_OPTIMIZATION.md)** - Voice activity detection deep dive
+- **[Changes Summary](docs/optimization/CHANGES_SUMMARY.md)** - Quick reference
+
+#### Features
+- **[SenseVoice Features](docs/features/SENSEVOICE_FEATURES.md)** - Language, emotion, events
+- **[Confidence Stitching](docs/features/CONFIDENCE_STITCHING.md)** - Smart boundary handling
+- **[Language Lock](docs/features/LANGUAGE_LOCK.md)** - Auto-lock feature
+
+#### Troubleshooting
+- **[Today's Fixes](docs/troubleshooting/TODAYS_FIXES.md)** - Recent bug fixes
+- **[Quantization Notes](docs/troubleshooting/QUANTIZATION_NOTES.md)** - FP16 accuracy analysis
+- **[Emotion Debug](docs/troubleshooting/EMOTION_RECOGNITION_DEBUG.md)** - Why emotions don't work
+
+**[📑 Browse all documentation →](docs/DOCUMENTATION_INDEX.md)**
+
+## ⚠️ Known Limitations
+
+### Emotion Recognition (SER)
+**Status**: ❌ Unreliable with FP16 quantization
+
+The RKNN model uses FP16 precision which causes significant degradation in emotion classification:
+- **Observed behavior**: All speech detected as NEUTRAL emotion (😐)
+- **Root cause**: FP16 precision loss affects subtle prosodic features needed for emotion discrimination
+- **Impact**: Emotion recognition accuracy ~30-40% (vs. 70%+ claimed in papers with FP32)
+- **Workaround**: Emotion display disabled by default (`SHOW_EMOTIONS=false`)
+
+**Why this happens:**
+- Emotion needs subtle acoustic cues (pitch, energy, speaking rate)
+- FP16 has only ~3-4 decimal digits precision vs FP32's ~7 digits
+- 3-second audio chunks are too short for reliable emotion detection
+- SenseVoice trained primarily on Chinese speech; English emotion recognition is weaker
+
+**If emotion detection is critical for your use case:**
+- Use longer audio chunks (5-10 seconds): `export CHUNK_DURATION=7.0`
+- Consider a dedicated SER model post-processing
+- Use full-precision ONNX model on CPU (slower but more accurate)
+
+See [EMOTION_RECOGNITION_DEBUG.md](docs/troubleshooting/EMOTION_RECOGNITION_DEBUG.md) for detailed analysis.
+
+### Language Identification (LID)
+**Status**: ✅ Works well (90%+ accuracy)
+
+### Audio Event Detection (AED)
+**Status**: ✅ Works reasonably (70-80% accuracy for common events like BGM, Applause)
+
+### Text Transcription (ASR)
+**Status**: ✅ Excellent (85-95% accuracy with SPEECH_SCALE optimization)
 
 ## 🤝 Contributing
 

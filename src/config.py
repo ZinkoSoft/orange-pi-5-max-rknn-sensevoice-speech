@@ -47,14 +47,18 @@ class ConfigManager:
         # SenseVoice metadata filtering options
         'filter_bgm': True,  # Skip transcriptions when background music is detected
         'filter_events': [],  # List of audio events to filter out (e.g., ['BGM', 'Applause'])
-        'show_emotions': True,  # Include emotion emojis in output
+        'show_emotions': False,  # Include emotion emojis in output (disabled: FP16 quantization makes SER unreliable)
         'show_events': True,  # Include event emojis in output
         'show_language': True,  # Show detected language in output
         # Language auto-locking (LID warmup)
         'enable_language_lock': True,  # Auto-lock language after warmup period
         'language_lock_warmup_s': 10.0,  # Seconds to collect LID samples before locking
         'language_lock_min_samples': 3,  # Minimum successful transcriptions before locking
-        'language_lock_confidence': 0.6  # Minimum % of samples in same language to lock
+        'language_lock_confidence': 0.6,  # Minimum % of samples in same language to lock
+        # Confidence-gated stitching for chunk boundaries
+        'enable_confidence_stitching': True,  # Use model confidence to gate chunk boundary merges
+        'confidence_threshold': 0.6,  # Minimum token confidence to keep overlap tokens (0.0-1.0)
+        'overlap_word_count': 4  # Number of words to track at chunk boundaries for stitching
     }
 
     REQUIRED_FILES = [
@@ -105,7 +109,10 @@ class ConfigManager:
             'ENABLE_LANGUAGE_LOCK': ('enable_language_lock', lambda x: x.lower() == 'true'),
             'LANGUAGE_LOCK_WARMUP_S': ('language_lock_warmup_s', float),
             'LANGUAGE_LOCK_MIN_SAMPLES': ('language_lock_min_samples', int),
-            'LANGUAGE_LOCK_CONFIDENCE': ('language_lock_confidence', float)
+            'LANGUAGE_LOCK_CONFIDENCE': ('language_lock_confidence', float),
+            'ENABLE_CONFIDENCE_STITCHING': ('enable_confidence_stitching', lambda x: x.lower() == 'true'),
+            'CONFIDENCE_THRESHOLD': ('confidence_threshold', float),
+            'OVERLAP_WORD_COUNT': ('overlap_word_count', int)
         }
 
         for env_var, (config_key, converter) in env_mappings.items():

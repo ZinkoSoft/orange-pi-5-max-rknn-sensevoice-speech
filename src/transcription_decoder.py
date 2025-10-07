@@ -120,6 +120,12 @@ class TranscriptionDecoder:
         self._similarity_threshold = config.get('similarity_threshold', 0.85)  # Fuzzy matching threshold
         self._chunk_hashes = deque(maxlen=10)  # Track recent audio chunk hashes
         self._hash_to_text = {}  # Map audio hash to transcription
+        
+        # Confidence-gated stitching
+        self._enable_confidence_stitching = config.get('enable_confidence_stitching', True)
+        self._confidence_threshold = config.get('confidence_threshold', 0.6)
+        self._overlap_word_count = config.get('overlap_word_count', 4)
+        self._prev_chunk_tail = None  # Store (text, confidence, word_list) from previous chunk
 
     def load_tokenizer(self, bpe_path: str) -> bool:
         """Load SentencePiece tokenizer"""
@@ -156,13 +162,14 @@ class TranscriptionDecoder:
         - Audio chunk deduplication
         - CTC argmax + collapse
         - blank-probability gate
+        - Confidence-gated stitching at chunk boundaries
         - SER (Speech Emotion Recognition) extraction
         - AED (Audio Event Detection) extraction
         - LID (Language Identification) extraction
         - duplicate suppression
         
         Returns:
-            dict with keys: text, language, emotion, audio_events, raw_text
+            dict with keys: text, language, emotion, audio_events, raw_text, confidence
             or None if filtered out
         """
         try:
@@ -172,12 +179,33 @@ class TranscriptionDecoder:
                 if cached_result:
                     logger.debug(f"🔄 Skip duplicate audio chunk (hash: {audio_hash[:8]}...)")
                     return None
-            def unique_consecutive(arr):
+            
+            def unique_consecutive_with_confidence(arr, probs):
+                """Collapse consecutive tokens and track max confidence per unique token"""
                 if len(arr) == 0:
-                    return arr
-                mask = np.append([True], arr[1:] != arr[:-1])
-                out = arr[mask]
-                return out[out != self.blank_id].tolist()
+                    return [], []
+                
+                token_ids = []
+                token_confidences = []
+                i = 0
+                while i < len(arr):
+                    current_token = arr[i]
+                    if current_token == self.blank_id:
+                        i += 1
+                        continue
+                    
+                    # Collect all consecutive occurrences of this token
+                    max_conf = probs[current_token, i]
+                    j = i + 1
+                    while j < len(arr) and arr[j] == current_token:
+                        max_conf = max(max_conf, probs[current_token, j])
+                        j += 1
+                    
+                    token_ids.append(current_token)
+                    token_confidences.append(float(max_conf))
+                    i = j
+                
+                return token_ids, token_confidences
 
             if output_tensor.ndim != 3:
                 logger.error(f"Unexpected output tensor shape: {output_tensor.shape}")
@@ -198,24 +226,42 @@ class TranscriptionDecoder:
                 logger.debug(f"🔇 Drop by blank gate (avg_blank={avg_blank:.3f})")
                 return None
 
-            # --- Argmax decode (CTC)
+            # --- Argmax decode (CTC) with confidence tracking
             ids = np.argmax(logits, axis=0)                           # [T]
-            ids = unique_consecutive(ids)
+            ids, confidences = unique_consecutive_with_confidence(ids, probs)
 
             if not ids:
                 return None
 
-            text = self.sp.DecodeIds(ids).strip()
+            # Calculate average confidence for this chunk
+            avg_confidence = float(np.mean(confidences)) if confidences else 0.0
+
+            # Convert ids to Python list of ints for SentencePiece
+            ids_list = [int(token_id) for token_id in ids]
+            text = self.sp.DecodeIds(ids_list).strip()
 
             # --- Parse SenseVoice metadata tokens (LID + SER + AED)
             metadata = parse_sensevoice_tokens(text)
             text_clean = metadata['text']
+            
+            # Debug: Log raw text to see emotion tokens
+            if text != text_clean:
+                logger.debug(f"🔍 Raw model output: {text}")
+                logger.debug(f"🔍 Parsed metadata: {metadata}")
 
             # --- Require some real alphanumeric content
             alnum = re.findall(r"[A-Za-z0-9]", text_clean)
             if len(alnum) < self.config['min_chars']:
                 logger.debug(f"🔇 Too little content after cleanup: '{text_clean}'")
                 return None
+            
+            # --- Confidence-gated stitching for chunk boundaries
+            if self._enable_confidence_stitching and self._prev_chunk_tail is not None:
+                text_clean = self._apply_confidence_stitching(text_clean, avg_confidence)
+            
+            # --- Store tail of current chunk for next iteration
+            if self._enable_confidence_stitching:
+                self._store_chunk_tail(text_clean, avg_confidence)
 
             # --- Enhanced duplicate suppression with fuzzy matching
             import time
@@ -240,7 +286,8 @@ class TranscriptionDecoder:
                 'emotion': metadata['emotion'],
                 'audio_events': metadata['audio_events'],
                 'raw_text': metadata['raw_text'],
-                'has_itn': metadata['has_itn']
+                'has_itn': metadata['has_itn'],
+                'confidence': avg_confidence
             }
             
             # Log with rich metadata
@@ -260,3 +307,75 @@ class TranscriptionDecoder:
         except Exception as e:
             logger.error(f"❌ Text decoding error: {e}")
             return None
+    
+    def _store_chunk_tail(self, text: str, confidence: float) -> None:
+        """Store the tail words from current chunk for next boundary comparison"""
+        words = text.split()
+        if len(words) >= self._overlap_word_count:
+            tail_words = words[-self._overlap_word_count:]
+            self._prev_chunk_tail = {
+                'text': ' '.join(tail_words),
+                'confidence': confidence,
+                'words': tail_words
+            }
+        else:
+            # Store what we have if less than desired word count
+            self._prev_chunk_tail = {
+                'text': text,
+                'confidence': confidence,
+                'words': words
+            }
+    
+    def _apply_confidence_stitching(self, current_text: str, current_confidence: float) -> str:
+        """
+        Apply confidence-gated stitching at chunk boundaries.
+        
+        If the previous chunk's tail had low confidence (< threshold), and it appears
+        duplicated at the start of the current chunk, we trim it to prevent garbled merges.
+        
+        Returns:
+            Cleaned text with smart boundary handling
+        """
+        prev_tail = self._prev_chunk_tail
+        if not prev_tail:
+            return current_text
+        
+        prev_text = prev_tail['text']
+        prev_confidence = prev_tail['confidence']
+        prev_words = prev_tail['words']
+        
+        # Split current text into words
+        current_words = current_text.split()
+        if not current_words:
+            return current_text
+        
+        # Check if previous tail appears at start of current chunk
+        # Look for partial or full matches
+        max_overlap = min(len(prev_words), len(current_words))
+        
+        for overlap_len in range(max_overlap, 0, -1):
+            prev_tail_subset = ' '.join(prev_words[-overlap_len:])
+            current_head_subset = ' '.join(current_words[:overlap_len])
+            
+            # Calculate similarity between tail and head
+            similarity = levenshtein_similarity(prev_tail_subset.lower(), current_head_subset.lower())
+            
+            if similarity >= 0.7:  # High similarity indicates overlap
+                # Decision: trim if previous tail had low confidence
+                if prev_confidence < self._confidence_threshold:
+                    # Previous chunk tail was uncertain - trust current chunk
+                    logger.debug(f"🔧 Confidence-gated trim: prev_conf={prev_confidence:.3f} < {self._confidence_threshold:.3f}, "
+                               f"removing overlap: '{current_head_subset}'")
+                    return ' '.join(current_words[overlap_len:])
+                elif current_confidence < self._confidence_threshold:
+                    # Current chunk start is uncertain - might be better to keep previous
+                    logger.debug(f"🔧 Low confidence in current chunk start ({current_confidence:.3f}), keeping overlap")
+                    return current_text
+                else:
+                    # Both have good confidence - normal duplicate suppression will handle
+                    logger.debug(f"✅ Both chunks confident (prev={prev_confidence:.3f}, curr={current_confidence:.3f}), "
+                               f"overlap detected but keeping current")
+                    return current_text
+        
+        # No significant overlap detected
+        return current_text

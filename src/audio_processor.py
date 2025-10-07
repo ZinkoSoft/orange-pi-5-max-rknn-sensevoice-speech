@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # SenseVoice constants
 RKNN_INPUT_LEN = 171
-SPEECH_SCALE = 1/2  # For fp16 inference to prevent overflow
+SPEECH_SCALE = 1/4  # For fp16 inference to prevent overflow (reduced for better stability)
 
 # Language mapping
 LANGUAGES = {"auto": 0, "zh": 3, "en": 4, "yue": 7, "ja": 11, "ko": 12, "nospeech": 13}

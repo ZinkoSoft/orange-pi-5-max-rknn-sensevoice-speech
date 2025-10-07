@@ -81,4 +81,4 @@ No lock needed - already fixed
 
 ## Full Documentation
 
-📖 **[LANGUAGE_LOCK.md](LANGUAGE_LOCK.md)** - Complete guide with examples and troubleshooting
+📖 **[LANGUAGE_LOCK.md](../features/LANGUAGE_LOCK.md)** - Complete guide with examples and troubleshooting

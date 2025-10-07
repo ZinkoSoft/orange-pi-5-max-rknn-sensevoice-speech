@@ -148,9 +148,9 @@ Speak different languages → See language tags switch
 
 ## Documentation
 
-- 📖 **[SENSEVOICE_FEATURES.md](SENSEVOICE_FEATURES.md)** - Complete guide (470+ lines)
+- 📖 **[SENSEVOICE_FEATURES.md](../features/SENSEVOICE_FEATURES.md)** - Complete guide (470+ lines)
 - 📋 **[RICH_METADATA_CHANGES.md](RICH_METADATA_CHANGES.md)** - Implementation summary
-- 🚀 **[README.md](README.md)** - Main documentation
+- 🚀 **[README.md](../../README.md)** - Main documentation
 
 ---
 
@@ -179,6 +179,6 @@ Chinese | English | Japanese | Korean | Cantonese
 
 ## Need Help?
 
-- **Full guide**: [SENSEVOICE_FEATURES.md](SENSEVOICE_FEATURES.md)
+- **Full guide**: [SENSEVOICE_FEATURES.md](../features/SENSEVOICE_FEATURES.md)
 - **Changes**: [RICH_METADATA_CHANGES.md](RICH_METADATA_CHANGES.md)
 - **Troubleshooting**: [README.md](README.md#-troubleshooting)
