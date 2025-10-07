@@ -1,0 +1,111 @@
+services:
+  sensevoice-npu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sensevoice-npu:latest
+    container_name: sensevoice-live
+    
+    # NPU and device access (matching working configuration)
+    privileged: true
+    devices:
+      - "/dev/rknpu:/dev/rknpu"
+      - "/dev/dri:/dev/dri"
+      - "/dev/mali0:/dev/mali0"
+    
+    # Volume mounts for model caching and NPU runtime (matching working configuration)
+    volumes:
+      # Critical NPU device mounts
+      - "/dev/dri/renderD129:/dev/dri/renderD129"
+      - "/proc/device-tree/compatible:/proc/device-tree/compatible:ro"
+      
+      # NPU runtime library (host-specific)
+      - "/usr/lib/librknnrt.so:/usr/lib/librknnrt.so:ro"
+      
+      # Model cache directory (persistent across container restarts)
+      - sensevoice-models:/app/models
+      - sensevoice-cache:/app/cache
+      - sensevoice-logs:/app/logs
+      
+      # Audio device access
+      - "/dev/snd:/dev/snd:rw"
+      
+      # X11 for potential GUI apps
+      - "/tmp/.X11-unix:/tmp/.X11-unix:rw"
+      
+      # Optional: mount host audio config
+      - /etc/asound.conf:/etc/asound.conf:ro
+      
+    # Environment variables (matching working configuration)
+    environment:
+      - PYTHONUNBUFFERED=1
+      - RKNN_LOG_LEVEL=3
+      - MODEL_CACHE_DIR=/app/models
+      - HUGGINGFACE_HUB_CACHE=/app/cache
+      - LOG_LEVEL=INFO
+      - LANGUAGE=en  # Options: auto, en, zh, ja, ko, yue
+      - USE_ITN=true
+      - ENABLE_VAD=true
+      - AUDIO_DEVICE=AIRHUG
+      - CHUNK_DURATION=3.0
+      - OVERLAP_DURATION=1.5
+      # NPU-specific environment variables
+      - DISPLAY=${DISPLAY}
+      - PULSE_RUNTIME_PATH=/var/run/pulse
+      - NPU_ENABLED=true
+      - container=docker
+      
+    # Network configuration (using host mode like working setup)
+    network_mode: host
+    
+    # Default command - start web interface with both transcription and web server
+    command: ["web-interface"]
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Health check override
+    healthcheck:
+      test: ["CMD", "/app/healthcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+        reservations:
+          memory: 2G
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+
+# Named volumes for persistent storage
+volumes:
+  sensevoice-models:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./model_cache/models
+  
+  sensevoice-cache:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./model_cache/cache
+      
+  sensevoice-logs:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./model_cache/logs

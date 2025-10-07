@@ -1,0 +1,142 @@
+# Cached Models and Data
+models/whisper
+
+# Environment and Configuration
+.env
+.env.local
+.env.production
+.env.staging
+.env.deprecated
+.env.old
+.env.backup
+
+# Docker and Containers
+.dockerignore
+docker-compose.override.yml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Allow checked-in UI library assets
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs and Runtime data
+*.log
+logs/
+*.pid
+*.seed
+*.pid.lock
+
+# MQTT and temporary files
+*.passwd
+passwd
+mosquitto.log
+*.tmp
+*.temp
+
+# Audio files (if any test recordings are made)
+*.wav
+*.mp3
+*.flac
+*.ogg
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Test coverage and reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Documentation builds
+docs/_build/
+
+# Local development
+.local/
+local/
+scratch/
+debug/
+
+# MQTT specific ignores
+ops/passwd
+ops/mosquitto-config/passwd
+ops/mosquitto-config/mosquitto.conf
+ops/mosquitto-data/*
+
+# Memory Worker data
+data/*
+
+# User MCP server extensions (keep directory, ignore user servers)
+extensions/mcp-servers/*
+!extensions/mcp-servers/README.md
+!extensions/mcp-servers/.gitkeep
+
+.github
+
+server/models-cache
+
+firmware/esp32/.claude
+firmware/esp32/movement_config*
+
+
+plan
+config/*
+
+model_cache/logs/*
+model_cache/models/*
