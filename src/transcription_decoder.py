@@ -3,17 +3,34 @@
 Transcription Decoder Module
 ============================
 Handles CTC decoding, text processing, and transcription output formatting.
+Extracts rich metadata: emotions (SER), audio events (AED), and language detection (LID).
 """
 
 import re
 import hashlib
 from collections import deque
 import numpy as np
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import logging
 import sentencepiece as spm
 
 logger = logging.getLogger(__name__)
+
+# SenseVoice metadata tokens
+EMOTION_TAGS = {
+    'HAPPY': '😊', 'SAD': '😢', 'ANGRY': '😠', 'NEUTRAL': '😐',
+    'FEARFUL': '😨', 'DISGUSTED': '🤢', 'SURPRISED': '😲'
+}
+
+AUDIO_EVENT_TAGS = {
+    'BGM': '🎵', 'Speech': '💬', 'Applause': '👏', 'Laughter': '😄',
+    'Crying': '😭', 'Sneeze': '🤧', 'Breath': '💨', 'Cough': '🤒'
+}
+
+LANGUAGE_TAGS = {
+    'zh': 'Chinese', 'en': 'English', 'ja': 'Japanese',
+    'ko': 'Korean', 'yue': 'Cantonese', 'auto': 'Auto'
+}
 
 
 def levenshtein_similarity(s1: str, s2: str) -> float:
@@ -46,6 +63,51 @@ def levenshtein_similarity(s1: str, s2: str) -> float:
     max_len = max(len1, len2)
     return 1.0 - (distance / max_len) if max_len > 0 else 1.0
 
+
+def parse_sensevoice_tokens(text: str) -> Dict[str, Any]:
+    """
+    Parse SenseVoice metadata tokens from transcription.
+    Extracts language (LID), emotion (SER), and audio events (AED).
+    
+    Returns:
+        dict with keys: text, language, emotion, audio_events, raw_text
+    """
+    # Find all metadata tokens
+    tokens = re.findall(r"<\|(.*?)\|>", text)
+    
+    metadata = {
+        'raw_text': text,
+        'text': text,
+        'language': None,
+        'emotion': None,
+        'audio_events': [],
+        'has_itn': False
+    }
+    
+    for token in tokens:
+        token_upper = token.upper()
+        
+        # Check for language tags
+        if token in LANGUAGE_TAGS:
+            metadata['language'] = LANGUAGE_TAGS[token]
+            
+        # Check for emotion tags (SER)
+        elif token_upper in EMOTION_TAGS:
+            metadata['emotion'] = token_upper
+            
+        # Check for audio event tags (AED)
+        elif token_upper in AUDIO_EVENT_TAGS:
+            metadata['audio_events'].append(token_upper)
+            
+        # Check for ITN flag
+        elif token == 'withitn' or token == 'WITHITN':
+            metadata['has_itn'] = True
+    
+    # Remove all metadata tokens to get clean text
+    metadata['text'] = re.sub(r"<\|.*?\|>", "", text).strip()
+    
+    return metadata
+
 class TranscriptionDecoder:
     """Handles CTC decoding and text processing for SenseVoice"""
 
@@ -76,7 +138,7 @@ class TranscriptionDecoder:
             logger.error(f"❌ Tokenizer loading failed: {e}")
             return False
 
-    def add_audio_hash(self, audio_hash: str, transcription: str) -> None:
+    def add_audio_hash(self, audio_hash: str, transcription: Dict[str, Any]) -> None:
         """Track audio hash to prevent processing same audio chunk multiple times"""
         self._chunk_hashes.append(audio_hash)
         self._hash_to_text[audio_hash] = transcription
@@ -88,20 +150,26 @@ class TranscriptionDecoder:
             for h in oldest_hashes:
                 self._hash_to_text.pop(h, None)
 
-    def decode_output(self, output_tensor: np.ndarray, audio_hash: str = None) -> Optional[str]:
+    def decode_output(self, output_tensor: np.ndarray, audio_hash: str = None) -> Optional[Dict[str, Any]]:
         """
-        Decode NPU output -> text with:
+        Decode NPU output -> structured transcription with rich metadata:
         - Audio chunk deduplication
         - CTC argmax + collapse
         - blank-probability gate
-        - meta-token stripping
+        - SER (Speech Emotion Recognition) extraction
+        - AED (Audio Event Detection) extraction
+        - LID (Language Identification) extraction
         - duplicate suppression
+        
+        Returns:
+            dict with keys: text, language, emotion, audio_events, raw_text
+            or None if filtered out
         """
         try:
             # Check if we've already processed this audio chunk
             if audio_hash and audio_hash in self._chunk_hashes:
-                cached_text = self._hash_to_text.get(audio_hash)
-                if cached_text:
+                cached_result = self._hash_to_text.get(audio_hash)
+                if cached_result:
                     logger.debug(f"🔄 Skip duplicate audio chunk (hash: {audio_hash[:8]}...)")
                     return None
             def unique_consecutive(arr):
@@ -139,8 +207,9 @@ class TranscriptionDecoder:
 
             text = self.sp.DecodeIds(ids).strip()
 
-            # --- Strip SenseVoice meta tokens like <|en|><|BGM|><|withitn|>
-            text_clean = re.sub(r"<\|.*?\|>", "", text).strip()
+            # --- Parse SenseVoice metadata tokens (LID + SER + AED)
+            metadata = parse_sensevoice_tokens(text)
+            text_clean = metadata['text']
 
             # --- Require some real alphanumeric content
             alnum = re.findall(r"[A-Za-z0-9]", text_clean)
@@ -163,8 +232,30 @@ class TranscriptionDecoder:
 
             self.last_texts.append(text_clean)
             self._last_emit_ts = now
-            logger.info(f"📝 Transcription: {text_clean}")
-            return text_clean
+            
+            # --- Build rich output with metadata
+            result = {
+                'text': text_clean,
+                'language': metadata['language'],
+                'emotion': metadata['emotion'],
+                'audio_events': metadata['audio_events'],
+                'raw_text': metadata['raw_text'],
+                'has_itn': metadata['has_itn']
+            }
+            
+            # Log with rich metadata
+            log_parts = [f"📝 {text_clean}"]
+            if metadata['language']:
+                log_parts.append(f"[{metadata['language']}]")
+            if metadata['emotion']:
+                emoji = EMOTION_TAGS.get(metadata['emotion'], '')
+                log_parts.append(f"{emoji}{metadata['emotion']}")
+            if metadata['audio_events']:
+                events_str = ', '.join([f"{AUDIO_EVENT_TAGS.get(e, '')}{e}" for e in metadata['audio_events']])
+                log_parts.append(f"[{events_str}]")
+            
+            logger.info(' '.join(log_parts))
+            return result
 
         except Exception as e:
             logger.error(f"❌ Text decoding error: {e}")

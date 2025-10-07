@@ -78,6 +78,29 @@ Complete guide to all documentation files in this project.
 - Integration points
 - Performance metrics
 
+## 🎭 Rich Metadata Features
+
+### [SENSEVOICE_FEATURES.md](SENSEVOICE_FEATURES.md) 🆕
+**Complete guide to SenseVoice's built-in capabilities**
+- Language Identification (LID) - Auto-detect language
+- Speech Emotion Recognition (SER) - Detect emotions
+- Audio Event Detection (AED) - Detect background sounds
+- Configuration examples
+- Use case scenarios
+- WebSocket output format
+- Zero-overhead metadata extraction
+- Filtering and display options
+
+### [LANGUAGE_LOCK.md](LANGUAGE_LOCK.md) 🆕
+**Language auto-lock feature guide**
+- Why language wobble happens
+- How auto-lock prevents inconsistency
+- Configuration options
+- Warmup period behavior
+- Use case examples
+- Troubleshooting tips
+- Performance impact (zero overhead)
+
 ## 📖 Documentation Quick Reference
 
 ### By Purpose
@@ -99,6 +122,21 @@ Complete guide to all documentation files in this project.
 
 **"Should I use NPU for VAD?"**
 → [VAD_NPU_ANALYSIS.md](VAD_NPU_ANALYSIS.md) (TL;DR: No)
+
+**"How do I use emotion/language/event detection?"** 🆕
+→ [SENSEVOICE_FEATURES.md](SENSEVOICE_FEATURES.md)
+
+**"How do I filter out background music?"** 🆕
+→ [SENSEVOICE_FEATURES.md](SENSEVOICE_FEATURES.md) (Configuration section)
+
+**"What languages can it detect?"** 🆕
+→ [SENSEVOICE_FEATURES.md](SENSEVOICE_FEATURES.md) (Language Identification section)
+
+**"How do I prevent language wobble?"** 🆕
+→ [LANGUAGE_LOCK.md](LANGUAGE_LOCK.md)
+
+**"Language keeps switching incorrectly"** 🆕
+→ [LANGUAGE_LOCK.md](LANGUAGE_LOCK.md) (Enable auto-lock feature)
 
 **"I want to understand VAD performance"**
 → [VAD_OPTIMIZATION.md](VAD_OPTIMIZATION.md) → [VAD_COMPARISON.md](VAD_COMPARISON.md)

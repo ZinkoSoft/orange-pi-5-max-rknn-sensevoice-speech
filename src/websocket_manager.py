@@ -73,15 +73,25 @@ class WebSocketManager:
             logger.error(f"❌ Failed to start WebSocket server: {e}")
             return False
 
-    def broadcast_transcription(self, transcription: str) -> None:
-        """Broadcast transcription to all connected WebSocket clients"""
+    def broadcast_transcription(self, result: dict) -> None:
+        """
+        Broadcast rich transcription with metadata to all connected WebSocket clients.
+        
+        Args:
+            result: dict with keys: text, language, emotion, audio_events, raw_text
+        """
         if not self.is_running or not self.websocket_loop:
             return
 
         try:
             from websocket_server import broadcast_transcription
+            
+            # If result is a string (legacy), convert to dict
+            if isinstance(result, str):
+                result = {'text': result, 'language': None, 'emotion': None, 'audio_events': []}
+            
             asyncio.run_coroutine_threadsafe(
-                broadcast_transcription(transcription),
+                broadcast_transcription(result),
                 self.websocket_loop
             )
         except Exception as e:

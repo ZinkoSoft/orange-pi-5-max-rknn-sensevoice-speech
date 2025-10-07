@@ -41,14 +41,35 @@ class TranscriptionWebSocketServer:
         self.clients.discard(websocket)
         logger.info(f"🔌 Client disconnected. Total clients: {len(self.clients)}")
         
-    async def broadcast_transcription(self, transcription: str, confidence: str = "HIGH"):
-        """Broadcast transcription to all connected clients"""
+    async def broadcast_transcription(self, result, confidence: str = "HIGH"):
+        """
+        Broadcast rich transcription with metadata to all connected clients.
+        
+        Args:
+            result: dict with keys: text, language, emotion, audio_events, raw_text
+                    or str (legacy support)
+            confidence: confidence level (for backward compatibility)
+        """
         if not self.clients:
             return
+        
+        # Handle legacy string format
+        if isinstance(result, str):
+            result = {
+                'text': result,
+                'language': None,
+                'emotion': None,
+                'audio_events': []
+            }
             
         message = {
             "type": "transcription",
-            "text": transcription,
+            "text": result.get('text', ''),
+            "language": result.get('language'),
+            "emotion": result.get('emotion'),
+            "audio_events": result.get('audio_events', []),
+            "has_itn": result.get('has_itn', False),
+            "raw_text": result.get('raw_text', ''),
             "confidence": confidence,
             "timestamp": datetime.now().isoformat(),
             "source": "npu-sensevoice"
@@ -68,8 +89,15 @@ class TranscriptionWebSocketServer:
         # Remove disconnected clients
         for client in disconnected_clients:
             await self.unregister_client(client)
-            
-        logger.debug(f"📡 Broadcasted to {len(self.clients)} clients: {transcription}")
+        
+        # Format log message with metadata
+        log_parts = [result.get('text', '')]
+        if result.get('emotion'):
+            log_parts.append(f"[{result['emotion']}]")
+        if result.get('audio_events'):
+            log_parts.append(f"[{', '.join(result['audio_events'])}]")
+        
+        logger.debug(f"📡 Broadcasted to {len(self.clients)} clients: {' '.join(log_parts)}")
         
     async def broadcast_status(self, status: str, data: dict = None):
         """Broadcast status updates to all connected clients"""
@@ -182,10 +210,16 @@ def get_websocket_server() -> TranscriptionWebSocketServer:
         websocket_server = TranscriptionWebSocketServer()
     return websocket_server
 
-async def broadcast_transcription(text: str, confidence: str = "HIGH"):
-    """Convenience function to broadcast transcription"""
+async def broadcast_transcription(result, confidence: str = "HIGH"):
+    """
+    Convenience function to broadcast transcription with rich metadata.
+    
+    Args:
+        result: dict with keys: text, language, emotion, audio_events
+                or str (legacy support)
+    """
     server = get_websocket_server()
-    await server.broadcast_transcription(text, confidence)
+    await server.broadcast_transcription(result, confidence)
 
 async def broadcast_status(status: str, data: dict = None):
     """Convenience function to broadcast status"""

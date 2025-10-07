@@ -43,7 +43,18 @@ class ConfigManager:
         'vad_zcr_max': 0.35,  # Maximum zero-crossing rate for speech
         'vad_entropy_max': 0.85,  # Maximum spectral entropy for speech
         'adaptive_noise_floor': True,  # Enable adaptive noise floor updates
-        'vad_mode': 'accurate'  # 'fast' (RMS+ZCR, ~0.3ms) or 'accurate' (adds FFT, ~1.5ms)
+        'vad_mode': 'accurate',  # 'fast' (RMS+ZCR, ~0.3ms) or 'accurate' (adds FFT, ~1.5ms)
+        # SenseVoice metadata filtering options
+        'filter_bgm': True,  # Skip transcriptions when background music is detected
+        'filter_events': [],  # List of audio events to filter out (e.g., ['BGM', 'Applause'])
+        'show_emotions': True,  # Include emotion emojis in output
+        'show_events': True,  # Include event emojis in output
+        'show_language': True,  # Show detected language in output
+        # Language auto-locking (LID warmup)
+        'enable_language_lock': True,  # Auto-lock language after warmup period
+        'language_lock_warmup_s': 10.0,  # Seconds to collect LID samples before locking
+        'language_lock_min_samples': 3,  # Minimum successful transcriptions before locking
+        'language_lock_confidence': 0.6  # Minimum % of samples in same language to lock
     }
 
     REQUIRED_FILES = [
@@ -85,7 +96,16 @@ class ConfigManager:
             'VAD_ZCR_MAX': ('vad_zcr_max', float),
             'VAD_ENTROPY_MAX': ('vad_entropy_max', float),
             'ADAPTIVE_NOISE_FLOOR': ('adaptive_noise_floor', lambda x: x.lower() == 'true'),
-            'VAD_MODE': ('vad_mode', str)
+            'VAD_MODE': ('vad_mode', str),
+            'FILTER_BGM': ('filter_bgm', lambda x: x.lower() == 'true'),
+            'FILTER_EVENTS': ('filter_events', lambda x: x.split(',') if x else []),
+            'SHOW_EMOTIONS': ('show_emotions', lambda x: x.lower() == 'true'),
+            'SHOW_EVENTS': ('show_events', lambda x: x.lower() == 'true'),
+            'SHOW_LANGUAGE': ('show_language', lambda x: x.lower() == 'true'),
+            'ENABLE_LANGUAGE_LOCK': ('enable_language_lock', lambda x: x.lower() == 'true'),
+            'LANGUAGE_LOCK_WARMUP_S': ('language_lock_warmup_s', float),
+            'LANGUAGE_LOCK_MIN_SAMPLES': ('language_lock_min_samples', int),
+            'LANGUAGE_LOCK_CONFIDENCE': ('language_lock_confidence', float)
         }
 
         for env_var, (config_key, converter) in env_mappings.items():

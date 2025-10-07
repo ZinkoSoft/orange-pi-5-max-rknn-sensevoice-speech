@@ -34,6 +34,16 @@
 - 🔥 **70-90% Fewer Duplicates**: Advanced deduplication pipeline
 - 🔥 **50-80% Better Quiet Audio**: Enhanced low-volume speech detection
 
+### 🎭 Rich Metadata Features (NEW!)
+- 🌍 **Language Identification (LID)**: Auto-detect language (Chinese, English, Japanese, Korean, Cantonese)
+- 😊 **Speech Emotion Recognition (SER)**: Detect emotions (Happy, Sad, Angry, Neutral, etc.)
+- 🎵 **Audio Event Detection (AED)**: Detect background music, applause, laughter, coughing, etc.
+- 🚫 **Smart Filtering**: Skip transcriptions based on detected events (e.g., filter out BGM)
+- � **Language Auto-Lock**: Start with auto-detection, then lock to prevent language wobble
+- �📊 **Zero Overhead**: Metadata extraction uses existing model output (no extra inference time)
+
+**[📖 Complete Feature Guide](SENSEVOICE_FEATURES.md)** - Learn how to use all SenseVoice capabilities!
+
 ## 📋 Quick Start
 
 ### 1. Complete Setup (Recommended)
@@ -144,6 +154,45 @@ source scripts/configure_optimization.sh simple
 | `NOISE_CALIB_SECS` | `1.5` | Initial noise calibration time |
 | `MIN_CHARS` | `3` | Minimum alphanumeric chars to output |
 | `DUPLICATE_COOLDOWN_S` | `4.0` | Duplicate suppression window (seconds) |
+
+#### 🎭 Rich Metadata Settings (NEW!)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FILTER_BGM` | `false` | Skip transcriptions when background music detected |
+| `FILTER_EVENTS` | `` | Comma-separated events to filter (e.g., `BGM,Applause,Cough`) |
+| `SHOW_EMOTIONS` | `true` | Display emotion emojis (😊😢😠) in output |
+| `SHOW_EVENTS` | `true` | Display event emojis (🎵👏😄) in output |
+| `SHOW_LANGUAGE` | `true` | Show detected language tags in output |
+
+#### 🔒 Language Auto-Lock Settings (NEW!)
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_LANGUAGE_LOCK` | `true` | Auto-lock language after warmup period |
+| `LANGUAGE_LOCK_WARMUP_S` | `10.0` | Seconds to collect samples before locking |
+| `LANGUAGE_LOCK_MIN_SAMPLES` | `3` | Minimum successful transcriptions needed |
+| `LANGUAGE_LOCK_CONFIDENCE` | `0.6` | Minimum % consistency to lock (0.6 = 60%) |
+
+**How it works**: Start with `LANGUAGE=auto`, detect language for ~10s, then lock to prevent wobble.  
+📖 **[Language Lock Guide](LANGUAGE_LOCK.md)** - Complete documentation with examples
+
+**Example Configurations**:
+```yaml
+# Clean transcriptions (filter out noise/music)
+- FILTER_BGM=true
+- FILTER_EVENTS=BGM,Cough,Sneeze,Applause
+
+# Customer service monitoring (track emotions)
+- SHOW_EMOTIONS=true
+- SHOW_EVENTS=false
+- FILTER_BGM=true
+
+# Multi-lingual meeting (track languages)
+- LANGUAGE=auto
+- SHOW_LANGUAGE=true
+- SHOW_EMOTIONS=false
+```
+
+📖 **[Complete Feature Guide](SENSEVOICE_FEATURES.md)** - See all use cases and examples!
 
 ### System Cache Directories
 

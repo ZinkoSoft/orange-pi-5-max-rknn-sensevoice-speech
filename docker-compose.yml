@@ -49,6 +49,17 @@ services:
       - AUDIO_DEVICE=AIRHUG
       - CHUNK_DURATION=3.0
       - OVERLAP_DURATION=1.5
+      # SenseVoice rich metadata options (NEW!)
+      - FILTER_BGM=false  # Skip transcription when background music detected
+      - FILTER_EVENTS=  # Comma-separated events to filter (e.g., BGM,Applause)
+      - SHOW_EMOTIONS=true  # Display emotion emojis (😊😢😠)
+      - SHOW_EVENTS=true  # Display event emojis (🎵👏😄)
+      - SHOW_LANGUAGE=true  # Show detected language tags
+      # Language auto-lock (NEW!)
+      - ENABLE_LANGUAGE_LOCK=true  # Auto-lock language after warmup
+      - LANGUAGE_LOCK_WARMUP_S=10.0  # Warmup period (seconds)
+      - LANGUAGE_LOCK_MIN_SAMPLES=3  # Min transcriptions before lock
+      - LANGUAGE_LOCK_CONFIDENCE=0.6  # Min % consistency to lock (0.6 = 60%)
       # NPU-specific environment variables
       - DISPLAY=${DISPLAY}
       - PULSE_RUNTIME_PATH=/var/run/pulse
