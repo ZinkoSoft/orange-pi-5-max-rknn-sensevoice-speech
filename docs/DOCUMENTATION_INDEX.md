@@ -41,6 +41,20 @@ Complete guide to all documentation files in this project.
 - Rollback instructions
 - Key metrics
 
+## 🏗️ Architecture & Design
+
+### [ARCHITECTURE_REFACTORING.md](ARCHITECTURE_REFACTORING.md) 🔥 NEW!
+**SOLID principles implementation guide**
+- Refactoring overview and motivation
+- New component architecture (5 new classes)
+- Before/after code metrics (75% reduction in main class)
+- SOLID principles implementation
+- Component responsibilities and APIs
+- Testing strategy
+- Performance impact analysis (zero overhead)
+- Migration guide for developers
+- Benefits: maintainability, testability, reusability
+
 ## 🎤 Voice Activity Detection (VAD)
 
 ### [VAD_OPTIMIZATION.md](optimization/VAD_OPTIMIZATION.md)
@@ -218,6 +232,18 @@ Complete guide to all documentation files in this project.
 **"How does the pipeline work?"**
 → [PIPELINE_DIAGRAM.md](optimization/PIPELINE_DIAGRAM.md)
 
+**"Why was the code refactored?"** 🔥 NEW!
+→ [ARCHITECTURE_REFACTORING.md](ARCHITECTURE_REFACTORING.md)
+
+**"How do I understand the new component structure?"** 🔥 NEW!
+→ [ARCHITECTURE_REFACTORING.md](ARCHITECTURE_REFACTORING.md) (Component Overview section)
+
+**"What are the SOLID principles?"** 🔥 NEW!
+→ [ARCHITECTURE_REFACTORING.md](ARCHITECTURE_REFACTORING.md) (Benefits section)
+
+**"How do I test individual components?"** 🔥 NEW!
+→ [ARCHITECTURE_REFACTORING.md](ARCHITECTURE_REFACTORING.md) (Testing Strategy section)
+
 **"I need configuration reference"**
 → [README.md](../README.md) (Configuration section) → [OPTIMIZATION_GUIDE.md](optimization/OPTIMIZATION_GUIDE.md)
 
@@ -272,11 +298,18 @@ Complete guide to all documentation files in this project.
 - [PIPELINE_DIAGRAM.md](optimization/PIPELINE_DIAGRAM.md) - Architecture
 - [VAD_OPTIMIZATION.md](optimization/VAD_OPTIMIZATION.md) - Algorithms
 - [VAD_COMPARISON.md](optimization/VAD_COMPARISON.md) - Visual explanations
+- [ARCHITECTURE_REFACTORING.md](ARCHITECTURE_REFACTORING.md) - Code architecture
 
 #### Voice Activity Detection
 - [VAD_OPTIMIZATION.md](optimization/VAD_OPTIMIZATION.md) - Complete guide
 - [VAD_NPU_ANALYSIS.md](optimization/VAD_NPU_ANALYSIS.md) - Summary
 - [VAD_COMPARISON.md](optimization/VAD_COMPARISON.md) - Visual comparisons
+
+#### Architecture & Code Design
+- [ARCHITECTURE_REFACTORING.md](ARCHITECTURE_REFACTORING.md) - SOLID principles
+- Component breakdown and responsibilities
+- Testing strategies
+- Migration guides
 
 ## 📁 File Sizes (Approximate Reading Time)
 
@@ -298,7 +331,8 @@ Complete guide to all documentation files in this project.
 | [QUANTIZATION_NOTES.md](troubleshooting/QUANTIZATION_NOTES.md) | 6 KB | 8 min | Advanced |
 | [EMOTION_RECOGNITION_DEBUG.md](troubleshooting/EMOTION_RECOGNITION_DEBUG.md) | 10 KB | 12 min | Intermediate |
 | [DENOISER_EVALUATION.md](troubleshooting/DENOISER_EVALUATION.md) | 12 KB | 15 min | Advanced |
-| **Total** | **168 KB** | **~4.5 hours** | - |
+| [ARCHITECTURE_REFACTORING.md](ARCHITECTURE_REFACTORING.md) | 20 KB | 25 min | Advanced |
+| **Total** | **188 KB** | **~5 hours** | - |
 
 ## 🎯 Recommended Reading Paths
 
@@ -335,6 +369,15 @@ VAD_NPU_ANALYSIS.md (quick answer)
 → Configure VAD settings
 ```
 
+### Path 5: Developer/Contributor (1.5 hours)
+```
+README.md
+→ ARCHITECTURE_REFACTORING.md (code structure)
+→ OPTIMIZATION_GUIDE.md (features)
+→ Source code review in src/
+→ Review new component classes
+```
+
 ## 🔍 Search Tips
 
 Use GitHub's search (press `/` in browser) or `grep` to find specific topics:
@@ -357,6 +400,7 @@ All documentation is:
 - ✅ Tested on Orange Pi 5 Max with RK3588 NPU
 - ✅ Reflects v2.0 optimization release
 - ✅ Includes real performance benchmarks
+- ✅ Includes v2.0 architecture refactoring details
 
 ## 🤝 Contributing to Documentation
 
@@ -370,4 +414,4 @@ If you find errors or have suggestions:
 ---
 
 *Last updated: October 7, 2025*
-*Total documentation: 12 files, ~132KB, 3.5 hours reading time*
+*Total documentation: 17 files, ~188KB, 5 hours reading time*

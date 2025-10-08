@@ -59,11 +59,18 @@ check_requirements() {
         exit 1
     fi
     
-    # Check if docker-compose is available
-    if ! command -v docker-compose &> /dev/null; then
+    # Check if docker-compose is available (supports both v1 and v2)
+    if command -v docker-compose &> /dev/null; then
+        DOCKER_COMPOSE="docker-compose"
+    elif docker compose version &> /dev/null; then
+        DOCKER_COMPOSE="docker compose"
+    else
         log_error "docker-compose is not installed or not in PATH"
+        log_error "Please install Docker Compose: https://docs.docker.com/compose/install/"
         exit 1
     fi
+    
+    log_info "Using Docker Compose command: $DOCKER_COMPOSE"
     
     # Check NPU device access
     if [[ ! -e /dev/dri/renderD129 ]] && [[ ! -e /dev/rknpu ]]; then
@@ -85,7 +92,7 @@ check_requirements() {
 build_container() {
     log_info "Building container image..."
     
-    if docker-compose build; then
+    if $DOCKER_COMPOSE build; then
         log_success "Container built successfully"
     else
         log_error "Container build failed"
@@ -97,10 +104,10 @@ start_services() {
     log_info "Starting SenseVoice web interface..."
     
     # Stop any existing container
-    docker-compose down 2>/dev/null || true
+    $DOCKER_COMPOSE down 2>/dev/null || true
     
     # Start with web interface command
-    if docker-compose run --rm --service-ports "$CONTAINER_NAME" web-interface; then
+    if $DOCKER_COMPOSE run --rm --service-ports "$CONTAINER_NAME" web-interface; then
         log_success "Services started successfully"
     else
         log_error "Failed to start services"
@@ -145,7 +152,7 @@ main() {
 }
 
 # Handle script interruption
-trap 'log_info "Shutting down..."; docker-compose down; exit 0' INT TERM
+trap 'log_info "Shutting down..."; $DOCKER_COMPOSE down; exit 0' INT TERM
 
 # Execute main function
 main "$@"

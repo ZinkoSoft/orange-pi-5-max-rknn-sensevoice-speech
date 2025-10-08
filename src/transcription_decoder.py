@@ -126,6 +126,11 @@ class TranscriptionDecoder:
         self._confidence_threshold = config.get('confidence_threshold', 0.6)
         self._overlap_word_count = config.get('overlap_word_count', 4)
         self._prev_chunk_tail = None  # Store (text, confidence, word_list) from previous chunk
+        
+        # Progressive display filtering
+        self._enable_display_filter = config.get('enable_display_filter', True)
+        self._min_display_words = config.get('min_display_words', 4)  # Minimum words to display
+        self._display_confidence_min = config.get('display_confidence_min', 0.5)  # Min confidence to display
 
     def load_tokenizer(self, bpe_path: str) -> bool:
         """Load SentencePiece tokenizer"""
@@ -183,10 +188,11 @@ class TranscriptionDecoder:
             def unique_consecutive_with_confidence(arr, probs):
                 """Collapse consecutive tokens and track max confidence per unique token"""
                 if len(arr) == 0:
-                    return [], []
+                    return [], [], []
                 
                 token_ids = []
                 token_confidences = []
+                token_timings = []  # (start_frame, end_frame)
                 i = 0
                 while i < len(arr):
                     current_token = arr[i]
@@ -195,17 +201,20 @@ class TranscriptionDecoder:
                         continue
                     
                     # Collect all consecutive occurrences of this token
+                    start_frame = i
                     max_conf = probs[current_token, i]
                     j = i + 1
                     while j < len(arr) and arr[j] == current_token:
                         max_conf = max(max_conf, probs[current_token, j])
                         j += 1
+                    end_frame = j
                     
                     token_ids.append(current_token)
                     token_confidences.append(float(max_conf))
+                    token_timings.append((start_frame, end_frame))
                     i = j
                 
-                return token_ids, token_confidences
+                return token_ids, token_confidences, token_timings
 
             if output_tensor.ndim != 3:
                 logger.error(f"Unexpected output tensor shape: {output_tensor.shape}")
@@ -226,9 +235,9 @@ class TranscriptionDecoder:
                 logger.debug(f"🔇 Drop by blank gate (avg_blank={avg_blank:.3f})")
                 return None
 
-            # --- Argmax decode (CTC) with confidence tracking
+            # --- Argmax decode (CTC) with confidence tracking and timestamps
             ids = np.argmax(logits, axis=0)                           # [T]
-            ids, confidences = unique_consecutive_with_confidence(ids, probs)
+            ids, confidences, timings = unique_consecutive_with_confidence(ids, probs)
 
             if not ids:
                 return None
@@ -239,6 +248,19 @@ class TranscriptionDecoder:
             # Convert ids to Python list of ints for SentencePiece
             ids_list = [int(token_id) for token_id in ids]
             text = self.sp.DecodeIds(ids_list).strip()
+            
+            # Convert token timings to milliseconds
+            # SenseVoice: 171 frames for ~5.3 seconds → ~31.25ms per frame
+            frame_duration_ms = 31.25
+            tokens_with_timing = []
+            for token_id, conf, (start_frame, end_frame) in zip(ids_list, confidences, timings):
+                tokens_with_timing.append({
+                    'token_id': token_id,
+                    'token_text': self.sp.IdToPiece(token_id),
+                    'start_ms': start_frame * frame_duration_ms,
+                    'end_ms': end_frame * frame_duration_ms,
+                    'confidence': conf
+                })
 
             # --- Parse SenseVoice metadata tokens (LID + SER + AED)
             metadata = parse_sensevoice_tokens(text)
@@ -279,9 +301,13 @@ class TranscriptionDecoder:
             self.last_texts.append(text_clean)
             self._last_emit_ts = now
             
+            # --- Convert tokens to words with timestamps
+            words_with_timing = self._tokens_to_words_with_timestamps(tokens_with_timing)
+            
             # --- Build rich output with metadata
             result = {
                 'text': text_clean,
+                'words': words_with_timing,  # NEW: Word-level timestamps
                 'language': metadata['language'],
                 'emotion': metadata['emotion'],
                 'audio_events': metadata['audio_events'],
@@ -307,6 +333,68 @@ class TranscriptionDecoder:
         except Exception as e:
             logger.error(f"❌ Text decoding error: {e}")
             return None
+    
+    def _tokens_to_words_with_timestamps(self, tokens_with_timing: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Convert SentencePiece tokens to complete words with timing information.
+        
+        SentencePiece uses '▁' (U+2581) to mark word boundaries.
+        Merges subword tokens into complete words while preserving timing.
+        
+        Args:
+            tokens_with_timing: List of {token_id, token_text, start_ms, end_ms, confidence}
+        
+        Returns:
+            List of {word, start_ms, end_ms, confidence}
+        """
+        words_with_timing = []
+        current_word_tokens = []
+        current_start_ms = None
+        current_end_ms = None
+        current_confidences = []
+        
+        for token_info in tokens_with_timing:
+            token_text = token_info['token_text']
+            
+            # SentencePiece uses ▁ to mark beginning of words
+            if token_text.startswith('▁'):
+                # Start of new word - finalize previous word if exists
+                if current_word_tokens:
+                    word_text = ''.join(current_word_tokens).replace('▁', ' ').strip()
+                    if word_text and current_start_ms is not None and current_end_ms is not None:
+                        words_with_timing.append({
+                            'word': word_text,
+                            'start_ms': current_start_ms,
+                            'end_ms': current_end_ms,
+                            'confidence': float(np.mean(current_confidences))
+                        })
+                
+                # Start new word
+                current_word_tokens = [token_text]
+                current_start_ms = token_info['start_ms']
+                current_end_ms = token_info['end_ms']
+                current_confidences = [token_info['confidence']]
+            else:
+                # Continuation of current word (subword token)
+                current_word_tokens.append(token_text)
+                # Initialize timing if not set (handles first token not being word-start)
+                if current_start_ms is None:
+                    current_start_ms = token_info['start_ms']
+                current_end_ms = token_info['end_ms']
+                current_confidences.append(token_info['confidence'])
+        
+        # Finalize last word
+        if current_word_tokens:
+            word_text = ''.join(current_word_tokens).replace('▁', ' ').strip()
+            if word_text and current_start_ms is not None and current_end_ms is not None:
+                words_with_timing.append({
+                    'word': word_text,
+                    'start_ms': current_start_ms,
+                    'end_ms': current_end_ms,
+                    'confidence': float(np.mean(current_confidences))
+                })
+        
+        return words_with_timing
     
     def _store_chunk_tail(self, text: str, confidence: float) -> None:
         """Store the tail words from current chunk for next boundary comparison"""

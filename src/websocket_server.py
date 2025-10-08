@@ -62,9 +62,12 @@ class TranscriptionWebSocketServer:
                 'audio_events': []
             }
             
+        # Use raw_text (clean) if available, otherwise fall back to text
+        display_text = result.get('raw_text') or result.get('text', '')
+        
         message = {
             "type": "transcription",
-            "text": result.get('text', ''),
+            "text": display_text,
             "language": result.get('language'),
             "emotion": result.get('emotion'),
             "audio_events": result.get('audio_events', []),

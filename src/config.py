@@ -58,7 +58,12 @@ class ConfigManager:
         # Confidence-gated stitching for chunk boundaries
         'enable_confidence_stitching': True,  # Use model confidence to gate chunk boundary merges
         'confidence_threshold': 0.6,  # Minimum token confidence to keep overlap tokens (0.0-1.0)
-        'overlap_word_count': 4  # Number of words to track at chunk boundaries for stitching
+        'overlap_word_count': 4,  # Number of words to track at chunk boundaries for stitching
+        # Timeline-based merging with word timestamps
+        'enable_timeline_merging': True,  # Use word-level timestamps for clean chunk merging
+        'timeline_overlap_confidence': 0.6,  # Confidence difference to replace overlapping words
+        'timeline_min_word_confidence': 0.4,  # Minimum confidence to emit a word
+        'timeline_confidence_replacement': True  # Allow replacing overlapping words with higher confidence versions
     }
 
     REQUIRED_FILES = [
@@ -112,7 +117,11 @@ class ConfigManager:
             'LANGUAGE_LOCK_CONFIDENCE': ('language_lock_confidence', float),
             'ENABLE_CONFIDENCE_STITCHING': ('enable_confidence_stitching', lambda x: x.lower() == 'true'),
             'CONFIDENCE_THRESHOLD': ('confidence_threshold', float),
-            'OVERLAP_WORD_COUNT': ('overlap_word_count', int)
+            'OVERLAP_WORD_COUNT': ('overlap_word_count', int),
+            'ENABLE_TIMELINE_MERGING': ('enable_timeline_merging', lambda x: x.lower() == 'true'),
+            'TIMELINE_OVERLAP_CONFIDENCE': ('timeline_overlap_confidence', float),
+            'TIMELINE_MIN_WORD_CONFIDENCE': ('timeline_min_word_confidence', float),
+            'TIMELINE_CONFIDENCE_REPLACEMENT': ('timeline_confidence_replacement', lambda x: x.lower() == 'true')
         }
 
         for env_var, (config_key, converter) in env_mappings.items():

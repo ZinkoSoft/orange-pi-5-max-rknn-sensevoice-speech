@@ -52,9 +52,14 @@ check_prerequisites() {
         return 1
     fi
     
-    # Check Docker Compose
-    if ! command -v docker-compose >/dev/null 2>&1 && ! docker compose version >/dev/null 2>&1; then
+    # Check Docker Compose (supports both v1 and v2)
+    if command -v docker-compose >/dev/null 2>&1; then
+        log_info "Found Docker Compose v1 (docker-compose)"
+    elif docker compose version >/dev/null 2>&1; then
+        log_info "Found Docker Compose v2 (docker compose)"
+    else
         log_error "Docker Compose is not installed or not in PATH"
+        log_error "Please install Docker Compose: https://docs.docker.com/compose/install/"
         return 1
     fi
     
@@ -158,9 +163,9 @@ run_health_check() {
     fi
 }
 
-# Start services with Docker Compose
+# Start services with Docker Compose (with web interface)
 start_services() {
-    log_step "Starting SenseVoice services..."
+    log_step "Starting SenseVoice web interface..."
     
     cd "$SCRIPT_DIR"
     
@@ -169,16 +174,44 @@ start_services() {
     export SENSEVOICE_CACHE_PATH="$CACHE_BASE_DIR/cache"
     export SENSEVOICE_LOGS_PATH="$CACHE_BASE_DIR/logs"
     
-    # Use docker-compose or docker compose
+    # Detect Docker Compose command (v1 or v2)
     if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose up -d
+        DOCKER_COMPOSE="docker-compose"
+    elif docker compose version >/dev/null 2>&1; then
+        DOCKER_COMPOSE="docker compose"
     else
-        docker compose up -d
+        log_error "Docker Compose is not installed"
+        return 1
     fi
     
+    log_info "Using Docker Compose command: $DOCKER_COMPOSE"
+    
+    # Stop any existing container
+    $DOCKER_COMPOSE down 2>/dev/null || true
+    
+    # Start with web interface command
+    log_info "Starting services in background..."
+    $DOCKER_COMPOSE up -d
+    
+    # Wait for services to be ready
+    sleep 3
+    
     log_info "✅ Services started successfully"
-    log_info "📊 View logs with: docker logs -f sensevoice-live"
-    log_info "🛑 Stop with: docker-compose down (or docker compose down)"
+    echo ""
+    log_info "🌐 Web interface is running!"
+    echo ""
+    echo "Access URLs:"
+    echo "  📊 Web Dashboard: http://localhost:8080"
+    echo "  🔌 WebSocket API: ws://localhost:8765"
+    echo ""
+    echo "Features:"
+    echo "  • Real-time NPU transcription display"
+    echo "  • Live WebSocket streaming"
+    echo "  • Confidence level filtering"
+    echo "  • Interactive dashboard"
+    echo ""
+    log_info "� View logs with: $0 logs"
+    log_info "🛑 Stop with: $0 stop"
 }
 
 # Show usage information
@@ -194,8 +227,8 @@ Commands:
   test      - Test NPU access
   download  - Download models only
   health    - Run health check
-  start     - Start services
-  web       - Start web interface with transcription
+  start     - Start web interface with transcription (default mode)
+  web       - Alias for 'start' - starts web interface
   stop      - Stop services
   restart   - Restart services
   logs      - Show live logs
@@ -203,7 +236,7 @@ Commands:
 
 Examples:
   $0 setup      # Complete setup and start
-  $0 web        # Start web interface with dashboard
+  $0 start      # Start web interface with dashboard
   $0 logs       # View live transcription output
   $0 restart    # Restart the service
 EOF
@@ -215,18 +248,26 @@ stop_services() {
     
     cd "$SCRIPT_DIR"
     
+    # Detect Docker Compose command
     if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose down
+        DOCKER_COMPOSE="docker-compose"
+    elif docker compose version >/dev/null 2>&1; then
+        DOCKER_COMPOSE="docker compose"
     else
-        docker compose down
+        log_error "Docker Compose is not installed"
+        return 1
     fi
+    
+    $DOCKER_COMPOSE down
     
     log_info "✅ Services stopped"
 }
 
 # Restart services
 restart_services() {
+    log_step "Restarting services with rebuild..."
     stop_services
+    build_image
     start_services
 }
 
@@ -239,43 +280,8 @@ show_logs() {
 
 # Start web interface
 start_web_interface() {
-    log_step "Starting SenseVoice web interface..."
-    
-    cd "$SCRIPT_DIR"
-    
-    # Stop current container
-    log_info "Stopping current container..."
-    if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose down 2>/dev/null || true
-    else
-        docker compose down 2>/dev/null || true
-    fi
-    
-    # Start with web interface (docker-compose.yml now defaults to web-interface command)
-    log_info "Starting web interface with transcription..."
-    if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose up -d
-    else
-        docker compose up -d
-    fi
-    
-    # Wait a moment for services to start
-    sleep 3
-    
-    log_info "🌐 Web interface started successfully!"
-    echo ""
-    echo "Access URLs:"
-    echo "  📊 Web Dashboard: http://localhost:8080"
-    echo "  🔌 WebSocket API: ws://localhost:8765"
-    echo ""
-    echo "Features:"
-    echo "  • Real-time NPU transcription display"
-    echo "  • Live WebSocket streaming"
-    echo "  • Confidence level filtering"
-    echo "  • Interactive dashboard"
-    echo ""
-    log_info "📊 View logs with: $0 logs"
-    log_info "🛑 Stop with: $0 stop"
+    # Web interface is now the default, so just call start_services
+    start_services
 }
 
 # Clean up

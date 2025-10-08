@@ -190,6 +190,16 @@
             color: white;
         }
         
+        .metadata-badge {
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            font-weight: 500;
+            background: #e9ecef;
+            color: #495057;
+            margin-right: 4px;
+        }
+        
         .empty-state {
             text-align: center;
             color: #6c757d;
@@ -365,12 +375,31 @@
             
             const timestamp = new Date(data.timestamp).toLocaleTimeString();
             
+            // Build metadata badges
+            let metadataBadges = '';
+            if (data.language) {
+                metadataBadges += `<span class="metadata-badge">${data.language.toUpperCase()}</span>`;
+            }
+            if (data.emotion) {
+                const emotionEmoji = getEmotionEmoji(data.emotion);
+                metadataBadges += `<span class="metadata-badge">${emotionEmoji} ${data.emotion}</span>`;
+            }
+            if (data.audio_events && data.audio_events.length > 0) {
+                data.audio_events.forEach(event => {
+                    const eventEmoji = getEventEmoji(event);
+                    metadataBadges += `<span class="metadata-badge">${eventEmoji} ${event}</span>`;
+                });
+            }
+            
             item.innerHTML = `
                 <div class="transcription-header">
                     <span class="timestamp">${timestamp}</span>
-                    <span class="confidence-badge ${data.confidence.toLowerCase()}">${data.confidence}</span>
+                    <div style="display: flex; gap: 5px; align-items: center;">
+                        ${metadataBadges}
+                        <span class="confidence-badge ${data.confidence.toLowerCase()}">${data.confidence}</span>
+                    </div>
                 </div>
-                <p class="transcription-text">${data.text}</p>
+                <p class="transcription-text">${escapeHtml(data.text)}</p>
             `;
             
             transcriptionArea.appendChild(item);
@@ -383,6 +412,33 @@
             if (data.confidence === 'HIGH') {
                 stats.highConfidence++;
             }
+        }
+        
+        function getEmotionEmoji(emotion) {
+            const emojis = {
+                'HAPPY': '😊',
+                'SAD': '😢',
+                'ANGRY': '😠',
+                'NEUTRAL': '😐',
+                'UNKNOWN': '🤔'
+            };
+            return emojis[emotion] || '😐';
+        }
+        
+        function getEventEmoji(event) {
+            const emojis = {
+                'BGM': '🎵',
+                'Speech': '🗣️',
+                'Applause': '👏',
+                'Laughter': '😂'
+            };
+            return emojis[event] || '🔊';
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
         
         function updateStats() {

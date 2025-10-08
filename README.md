@@ -48,6 +48,17 @@
 
 **[📖 Complete Feature Guide](docs/features/SENSEVOICE_FEATURES.md)** - Learn how to use all SenseVoice capabilities!
 
+### 🏗️ Architecture (v2.0 Refactoring)
+- ✨ **SOLID Principles**: Code refactored into specialized, focused components
+- 📦 **Modular Components**: 5 new classes (AudioStreamManager, NoiseFloorCalibrator, LanguageLockManager, TranscriptionFormatter, AudioProcessingPipeline)
+- 🎯 **Single Responsibility**: Each component has one clear purpose
+- 🧪 **Testable**: Components can be tested in isolation
+- 📉 **75% Code Reduction**: Main orchestrator simplified from 817 → 204 lines
+- 🔧 **Maintainable**: Changes localized to specific components
+- ⚡ **Zero Performance Impact**: Same speed, better organization
+
+**[📖 Architecture Guide](docs/ARCHITECTURE_REFACTORING.md)** - Complete refactoring documentation with SOLID principles!
+
 ## 📋 Quick Start
 
 ### 1. Complete Setup (Recommended)
@@ -93,14 +104,20 @@ orange-pi-5-max-rknn-sensevoice-speech/
 ├── scripts/
 │   ├── download_models.sh          # Intelligent model download with caching
 │   └── configure_optimization.sh   # 🆕 Quick preset configurator
-├── src/
-│   ├── live_transcription.py       # Main orchestrator with VAD integration
+├── src/                            # 🏗️ Refactored with SOLID principles (v2.0)
+│   ├── live_transcription.py       # Lightweight orchestrator (204 lines, -75%)
 │   ├── model_manager.py            # 🆕 Optimized NPU inference (single core)
 │   ├── audio_processor.py          # 🆕 VAD + feature extraction
 │   ├── transcription_decoder.py    # 🆕 Fuzzy deduplication + CTC decode
 │   ├── config.py                   # 🆕 Configuration management
 │   ├── websocket_manager.py        # WebSocket broadcasting
-│   └── statistics_tracker.py       # Performance metrics
+│   ├── statistics_tracker.py       # Performance metrics
+│   ├── timeline_merger.py          # Timeline-based word merging
+│   ├── audio_stream_manager.py     # 🔥 Audio device & stream management
+│   ├── noise_floor_calibrator.py   # 🔥 Noise floor calibration & tracking
+│   ├── language_lock_manager.py    # 🔥 Language auto-detection & locking
+│   ├── transcription_formatter.py  # 🔥 Output formatting & filtering
+│   └── audio_processing_pipeline.py # 🔥 Audio → transcription pipeline
 └── model_cache/
     ├── models/                     # Downloaded RKNN models
     ├── cache/                      # Hugging Face cache
