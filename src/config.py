@@ -70,7 +70,13 @@ class ConfigManager:
         'enable_semantic_refinement': False,  # Use semantic similarity for boundary word selection (~5ms, optional)
         'spell_dict_path': '/app/dictionaries/frequency_dictionary_en_82_765.txt',  # SymSpell frequency dictionary
         'punctuation_min_length': 10,  # Don't punctuate very short texts
-        'spellcheck_confidence_threshold': 0.8  # Only high-confidence corrections
+        'spellcheck_confidence_threshold': 0.8,  # Only high-confidence corrections
+        # Pipeline parallelization (multi-threading)
+        'enable_pipeline_parallelization': True,  # Enable 3-stage parallel pipeline (preprocessing, inference, postprocessing)
+        'pipeline_preprocess_queue_size': 3,  # Preprocessing queue size (buffers audio chunks)
+        'pipeline_inference_queue_size': 2,  # Inference queue size (buffers preprocessed features)
+        'pipeline_postprocess_queue_size': 2,  # Postprocessing queue size (buffers inference results)
+        'pipeline_emit_queue_size': 10  # Emission queue size (buffers output for WebSocket/console)
     }
 
     REQUIRED_FILES = [
@@ -134,7 +140,12 @@ class ConfigManager:
             'ENABLE_SEMANTIC_REFINEMENT': ('enable_semantic_refinement', lambda x: x.lower() == 'true'),
             'SPELL_DICT_PATH': ('spell_dict_path', str),
             'PUNCTUATION_MIN_LENGTH': ('punctuation_min_length', int),
-            'SPELLCHECK_CONFIDENCE_THRESHOLD': ('spellcheck_confidence_threshold', float)
+            'SPELLCHECK_CONFIDENCE_THRESHOLD': ('spellcheck_confidence_threshold', float),
+            'ENABLE_PIPELINE_PARALLELIZATION': ('enable_pipeline_parallelization', lambda x: x.lower() == 'true'),
+            'PIPELINE_PREPROCESS_QUEUE_SIZE': ('pipeline_preprocess_queue_size', int),
+            'PIPELINE_INFERENCE_QUEUE_SIZE': ('pipeline_inference_queue_size', int),
+            'PIPELINE_POSTPROCESS_QUEUE_SIZE': ('pipeline_postprocess_queue_size', int),
+            'PIPELINE_EMIT_QUEUE_SIZE': ('pipeline_emit_queue_size', int)
         }
 
         for env_var, (config_key, converter) in env_mappings.items():

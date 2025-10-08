@@ -3,6 +3,10 @@ Audio Processing Pipeline
 =========================
 Orchestrates the complete audio processing pipeline from raw audio
 to final transcription output.
+
+Supports two modes:
+1. Sequential (legacy): All processing in single thread
+2. Parallel (new): Multi-stage pipeline with async queues
 """
 
 import logging
@@ -20,7 +24,8 @@ class AudioProcessingPipeline:
     def __init__(self, config: dict, audio_stream_manager, noise_floor_calibrator,
                  audio_processor, model_manager, transcription_decoder,
                  language_lock_manager, transcription_formatter, 
-                 timeline_merger, statistics_tracker, text_post_processor):
+                 timeline_merger, statistics_tracker, text_post_processor,
+                 websocket_manager):
         """
         Initialize audio processing pipeline.
         
@@ -36,6 +41,7 @@ class AudioProcessingPipeline:
             timeline_merger: Timeline merger instance (or None)
             statistics_tracker: Statistics tracker instance
             text_post_processor: Text post-processor instance
+            websocket_manager: WebSocketManager instance
         """
         self.config = config
         self.audio_stream = audio_stream_manager
@@ -48,17 +54,42 @@ class AudioProcessingPipeline:
         self.timeline_merger = timeline_merger
         self.statistics = statistics_tracker
         self.text_post_processor = text_post_processor
+        self.websocket_manager = websocket_manager
         
         # Pipeline settings
         self.chunk_duration = config['chunk_duration']
         self.overlap_duration = config['overlap_duration']
         self.enable_timeline_merging = (timeline_merger is not None)
         
+        # Pipeline mode: parallel or sequential
+        self.enable_parallel_pipeline = config.get('enable_pipeline_parallelization', True)
+        self.parallel_orchestrator = None
+        
         # Pipeline state
         self.worker_thread = None
         self.is_running = False
         self.chunk_counter = 0
         self.chunk_duration_ms = self.chunk_duration * 1000
+        
+        # Initialize parallel pipeline if enabled
+        if self.enable_parallel_pipeline:
+            from pipeline_orchestrator import PipelineOrchestrator
+            self.parallel_orchestrator = PipelineOrchestrator(
+                config,
+                audio_processor,
+                noise_floor_calibrator,
+                model_manager,
+                transcription_decoder,
+                language_lock_manager,
+                transcription_formatter,
+                timeline_merger,
+                statistics_tracker,
+                text_post_processor,
+                websocket_manager
+            )
+            logger.info("✅ Parallel pipeline orchestrator initialized")
+        else:
+            logger.info("ℹ️ Using sequential pipeline (legacy mode)")
 
     def start(self) -> bool:
         """
@@ -76,12 +107,36 @@ class AudioProcessingPipeline:
         device_rate = stream_info['device_rate']
         self.noise_calibrator.set_sample_rate(device_rate)
         
-        # Start worker thread
         self.is_running = True
-        self.worker_thread = threading.Thread(target=self._process_audio_worker, daemon=True)
-        self.worker_thread.start()
         
-        logger.info("Audio processing pipeline started")
+        # Start appropriate pipeline mode
+        if self.enable_parallel_pipeline:
+            # Start parallel pipeline orchestrator
+            if not self.parallel_orchestrator.start():
+                logger.error("Failed to start parallel pipeline")
+                self.is_running = False
+                return False
+            
+            # Start lightweight worker that feeds audio to parallel pipeline
+            self.worker_thread = threading.Thread(
+                target=self._parallel_audio_feeder,
+                name="AudioFeeder",
+                daemon=True
+            )
+            self.worker_thread.start()
+            
+            logger.info("✅ Audio processing pipeline started (PARALLEL MODE)")
+        else:
+            # Start sequential worker thread
+            self.worker_thread = threading.Thread(
+                target=self._process_audio_worker,
+                name="SequentialWorker",
+                daemon=True
+            )
+            self.worker_thread.start()
+            
+            logger.info("Audio processing pipeline started (sequential mode)")
+        
         return True
 
     def stop(self) -> None:
@@ -92,16 +147,83 @@ class AudioProcessingPipeline:
         logger.info("Stopping audio processing pipeline...")
         self.is_running = False
         
+        # Stop parallel pipeline if enabled
+        if self.enable_parallel_pipeline and self.parallel_orchestrator:
+            self.parallel_orchestrator.stop()
+        
         if self.worker_thread:
             self.worker_thread.join(timeout=5.0)
         
         logger.info("Audio processing pipeline stopped")
 
+    def _parallel_audio_feeder(self) -> None:
+        """
+        Lightweight worker that feeds audio to parallel pipeline.
+        
+        This worker only handles:
+        - Audio buffer accumulation
+        - Noise floor bootstrap
+        - Overlap management
+        - Submitting full buffers to parallel pipeline
+        
+        All processing (resample, VAD, features, inference, decode, merge)
+        happens in parallel pipeline stages.
+        """
+        audio_buffer = np.array([], dtype=np.int16)
+        
+        # Get stream info
+        stream_info = self.audio_stream.get_stream_info()
+        dev_rate = stream_info['device_rate']
+        
+        # Calculate buffer sizes
+        buffer_size_dev = int(dev_rate * self.chunk_duration)
+        overlap_size_dev = int(dev_rate * self.overlap_duration)
+        
+        logger.info(f"Parallel audio feeder started | Buffer: {self.chunk_duration}s | "
+                   f"Overlap: {self.overlap_duration}s | dev={dev_rate}Hz")
+        
+        while self.is_running:
+            try:
+                # Get next audio chunk
+                chunk = self.audio_stream.get_audio_chunk(timeout=0.1)
+                if chunk is None:
+                    continue
+                
+                audio_buffer = np.concatenate([audio_buffer, chunk])
+                
+                # Bootstrap noise floor calibration
+                if not self.noise_calibrator.is_calibrated():
+                    if self.noise_calibrator.bootstrap_calibration(audio_buffer):
+                        logger.info("Noise floor calibration complete")
+                    continue
+                
+                # Wait for full buffer
+                if len(audio_buffer) < buffer_size_dev:
+                    continue
+                
+                # Submit to parallel pipeline (non-blocking)
+                self.parallel_orchestrator.submit_audio_chunk(
+                    audio_buffer,
+                    self.chunk_counter
+                )
+                
+                # Increment counter
+                self.chunk_counter += 1
+                
+                # Keep overlap
+                audio_buffer = self._keep_overlap(audio_buffer, overlap_size_dev)
+                
+            except Exception as e:
+                logger.error(f"Audio feeder error: {e}", exc_info=True)
+                self.statistics.record_error()
+        
+        logger.info("Parallel audio feeder stopped")
+
     def _process_audio_worker(self) -> None:
         """
-        Main audio processing worker thread.
+        Main audio processing worker thread (SEQUENTIAL MODE - LEGACY).
         
-        Orchestrates the complete audio processing pipeline.
+        Orchestrates the complete audio processing pipeline sequentially.
         """
         audio_buffer = np.array([], dtype=np.int16)
         
@@ -329,10 +451,18 @@ class AudioProcessingPipeline:
         Returns:
             dict: Status information
         """
-        return {
+        status = {
             'is_running': self.is_running,
+            'mode': 'parallel' if self.enable_parallel_pipeline else 'sequential',
             'chunk_counter': self.chunk_counter,
             'noise_calibration': self.noise_calibrator.get_calibration_progress(),
             'language_lock': self.language_manager.get_status(),
             'timeline_merging_enabled': self.enable_timeline_merging
         }
+        
+        # Add parallel pipeline stats if enabled
+        if self.enable_parallel_pipeline and self.parallel_orchestrator:
+            status['parallel_stats'] = self.parallel_orchestrator.get_statistics()
+            status['queue_depths'] = self.parallel_orchestrator.get_queue_depths()
+        
+        return status

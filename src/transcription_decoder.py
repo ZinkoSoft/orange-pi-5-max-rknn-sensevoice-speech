@@ -227,7 +227,9 @@ class TranscriptionDecoder:
             # compute softmax across vocab (ok at this size; T is small)
             # logits are float16/32; be numerically safe
             m = np.max(logits, axis=0, keepdims=True)
-            exp = np.exp(logits - m)
+            # Clip extreme values to prevent overflow/underflow
+            logits_safe = np.clip(logits - m, -100, 100)
+            exp = np.exp(logits_safe)
             probs = exp / np.sum(exp, axis=0, keepdims=True)          # [vocab, T]
             blank_prob = probs[self.blank_id, :]                       # [T]
             avg_blank = float(np.mean(blank_prob))

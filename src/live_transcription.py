@@ -89,7 +89,8 @@ class LiveTranscriber:
             self.formatter,
             self.timeline_merger,
             self.statistics,
-            self.text_post_processor
+            self.text_post_processor,
+            self.websocket_manager
         )
         
         logger.info("Initializing Live Transcriber with modular components")
