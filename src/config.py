@@ -63,7 +63,14 @@ class ConfigManager:
         'enable_timeline_merging': True,  # Use word-level timestamps for clean chunk merging
         'timeline_overlap_confidence': 0.6,  # Confidence difference to replace overlapping words
         'timeline_min_word_confidence': 0.4,  # Minimum confidence to emit a word
-        'timeline_confidence_replacement': True  # Allow replacing overlapping words with higher confidence versions
+        'timeline_confidence_replacement': True,  # Allow replacing overlapping words with higher confidence versions
+        # Text post-processing (CPU-based)
+        'enable_punctuation_restoration': False,  # Add punctuation and capitalization (~5ms per sentence) - DISABLED: library compatibility issue
+        'enable_spellcheck': True,  # Fix common typos using dictionary lookup (~1ms per sentence)
+        'enable_semantic_refinement': False,  # Use semantic similarity for boundary word selection (~5ms, optional)
+        'spell_dict_path': '/app/dictionaries/frequency_dictionary_en_82_765.txt',  # SymSpell frequency dictionary
+        'punctuation_min_length': 10,  # Don't punctuate very short texts
+        'spellcheck_confidence_threshold': 0.8  # Only high-confidence corrections
     }
 
     REQUIRED_FILES = [
@@ -121,7 +128,13 @@ class ConfigManager:
             'ENABLE_TIMELINE_MERGING': ('enable_timeline_merging', lambda x: x.lower() == 'true'),
             'TIMELINE_OVERLAP_CONFIDENCE': ('timeline_overlap_confidence', float),
             'TIMELINE_MIN_WORD_CONFIDENCE': ('timeline_min_word_confidence', float),
-            'TIMELINE_CONFIDENCE_REPLACEMENT': ('timeline_confidence_replacement', lambda x: x.lower() == 'true')
+            'TIMELINE_CONFIDENCE_REPLACEMENT': ('timeline_confidence_replacement', lambda x: x.lower() == 'true'),
+            'ENABLE_PUNCTUATION_RESTORATION': ('enable_punctuation_restoration', lambda x: x.lower() == 'true'),
+            'ENABLE_SPELLCHECK': ('enable_spellcheck', lambda x: x.lower() == 'true'),
+            'ENABLE_SEMANTIC_REFINEMENT': ('enable_semantic_refinement', lambda x: x.lower() == 'true'),
+            'SPELL_DICT_PATH': ('spell_dict_path', str),
+            'PUNCTUATION_MIN_LENGTH': ('punctuation_min_length', int),
+            'SPELLCHECK_CONFIDENCE_THRESHOLD': ('spellcheck_confidence_threshold', float)
         }
 
         for env_var, (config_key, converter) in env_mappings.items():

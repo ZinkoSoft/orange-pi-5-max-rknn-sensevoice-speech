@@ -20,7 +20,7 @@ class AudioProcessingPipeline:
     def __init__(self, config: dict, audio_stream_manager, noise_floor_calibrator,
                  audio_processor, model_manager, transcription_decoder,
                  language_lock_manager, transcription_formatter, 
-                 timeline_merger, statistics_tracker):
+                 timeline_merger, statistics_tracker, text_post_processor):
         """
         Initialize audio processing pipeline.
         
@@ -35,6 +35,7 @@ class AudioProcessingPipeline:
             transcription_formatter: Transcription formatter instance
             timeline_merger: Timeline merger instance (or None)
             statistics_tracker: Statistics tracker instance
+            text_post_processor: Text post-processor instance
         """
         self.config = config
         self.audio_stream = audio_stream_manager
@@ -46,6 +47,7 @@ class AudioProcessingPipeline:
         self.formatter = transcription_formatter
         self.timeline_merger = timeline_merger
         self.statistics = statistics_tracker
+        self.text_post_processor = text_post_processor
         
         # Pipeline settings
         self.chunk_duration = config['chunk_duration']
@@ -257,7 +259,7 @@ class AudioProcessingPipeline:
 
     def _process_with_timeline_merging(self, result: dict) -> None:
         """
-        Process transcription using timeline-based merging.
+        Process transcription using timeline-based merging with post-processing.
         
         Args:
             result: Transcription result with word timestamps
@@ -274,10 +276,22 @@ class AudioProcessingPipeline:
         if new_words:
             # Build display text from NEW words only
             new_text = ' '.join(w['word'] for w in new_words)
-            display_text = self.formatter.format_display_text(new_text, result)
             
-            # Update result with new text
-            result['text'] = new_text
+            # 🔥 POST-PROCESS THE TEXT
+            # Get previous sentence for context (if available)
+            prev_text = self.text_post_processor._last_sentence if self.text_post_processor else None
+            
+            # Apply punctuation restoration, spell correction, etc.
+            if self.text_post_processor:
+                cleaned_text = self.text_post_processor.process(new_text, prev_text)
+            else:
+                cleaned_text = new_text
+            
+            # Format for display with metadata
+            display_text = self.formatter.format_display_text(cleaned_text, result)
+            
+            # Update result with cleaned text
+            result['text'] = cleaned_text
             
             # Emit transcription
             self.formatter.emit_transcription(display_text, result, new_words)

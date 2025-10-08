@@ -27,6 +27,7 @@ from noise_floor_calibrator import NoiseFloorCalibrator
 from language_lock_manager import LanguageLockManager
 from transcription_formatter import TranscriptionFormatter
 from audio_processing_pipeline import AudioProcessingPipeline
+from text_post_processor import TextPostProcessor
 
 # Configure logging
 logging.basicConfig(
@@ -72,6 +73,10 @@ class LiveTranscriber:
         self.language_manager = LanguageLockManager(self.config)
         self.formatter = TranscriptionFormatter(self.config, self.websocket_manager)
         
+        # Initialize text post-processor
+        self.text_post_processor = TextPostProcessor(self.config)
+        logger.info("✅ Text post-processor initialized")
+        
         # Initialize audio processing pipeline
         self.pipeline = AudioProcessingPipeline(
             self.config,
@@ -83,7 +88,8 @@ class LiveTranscriber:
             self.language_manager,
             self.formatter,
             self.timeline_merger,
-            self.statistics
+            self.statistics,
+            self.text_post_processor
         )
         
         logger.info("Initializing Live Transcriber with modular components")

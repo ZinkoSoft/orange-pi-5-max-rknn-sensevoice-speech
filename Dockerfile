@@ -54,7 +54,11 @@ RUN pip3 install --no-cache-dir \
     sentencepiece \
     kaldi-native-fbank \
     websockets \
-    asyncio
+    asyncio \
+    deepmultilingualpunctuation>=2.0.0 \
+    symspellpy>=6.7.0 \
+    sentence-transformers>=2.2.0 \
+    rapidfuzz>=3.0.0
 
 # Install RKNN toolkit
 RUN pip3 install --no-cache-dir \
@@ -72,6 +76,9 @@ COPY healthcheck.sh /app/
 
 # Make scripts executable
 RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh /app/scripts/*.sh
+
+# Download spell dictionary
+RUN bash /app/scripts/download_spell_dict.sh
 
 # Create non-root user for security
 RUN useradd -m -u 1000 -s /bin/bash sensevoice && \
